@@ -1,3 +1,4 @@
+#pragma once
 #include <vector>
 #include <optional>
 
@@ -5,14 +6,16 @@
 template <class keyT, class valueT>
 class hashNode{
 public:
-    keyT   key;
-    valueT value;
-    bool   isOccupied;
-
+    keyT key;
+    // multiples values for the same key
+    std::vector<valueT> values;
+    bool isOccupied;
+    size_t psl; //probe sequence length
     hashNode() : isOccupied(false) {
 
     }
 };
+
 
 template <class keyT, class valueT>
 class RobinHoodHashTable {
