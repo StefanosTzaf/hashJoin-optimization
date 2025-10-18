@@ -8,13 +8,11 @@ class hashNode{
 
     keyT   key;
     valueT value;
-    bool   is_occupied;
+    bool   is_occupied; // indicates if the node is occupied
     int psl; // probe sequence length
     
 public:
-    hashNode() : is_occupied(false) {
-
-    }
+    hashNode() : is_occupied(false), psl(0) {}
 
     bool isOccupied() const{
         return is_occupied;
@@ -54,17 +52,19 @@ template <class keyT, class valueT>
 class RobinHoodHashTable {
 
 private:
-    size_t capacity;
-    size_t size;
+    size_t capacity; // total capacity of the table
+    size_t size; // current number of elements in the table
     std::vector<hashNode<keyT, valueT>> table;
 
     public:
+    
     //constructor
     RobinHoodHashTable(size_t initialCapacity = 16);
+    
     bool hashInsert(const keyT& key, const valueT& value);
     bool hashSearch(const keyT& key, valueT& value) const;
     void rehash();
-    void printTable();
+    void printTable(); // for debugging
     
     // if not found, return std::nullopt 
     //std::optional<valueT> hashSearch(const keyT& key) const;
@@ -155,7 +155,6 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     return false; // full table
 
 }
-
 
 template <typename keyT, typename valueT>
 void RobinHoodHashTable<keyT, valueT>::printTable(){
