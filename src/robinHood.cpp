@@ -2,74 +2,49 @@
 
 // #include "robinHood.h"
 
-// using namespace std;
+template <class keyT, class valueT>
+bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT& value) {
+    
+    // if ((double)(size + 1) / (double)capacity > 0.7) {
+    //     rehash();
+    // }
 
-// template <typename keyT, typename valueT>
-// // dynamically allocate table(vector)
-// RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity)
-//     : capacity(initialCapacity), size(0), table(capacity) {
-// }
+    size_t idx = hashFunction(key) % capacity;
+    size_t psl = 0;
 
-// template <typename keyT, typename valueT>
-// size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const{
-//     return key % capacity; // ΠΡΟΧΕΙΡΟ
-// }
+    hashNode<keyT, valueT> cur;
+    cur.key = key;
+    // initialize values vector with the incoming value
+    cur.values.clear();
+    cur.values.emplace_back(value);
+    cur.isOccupied = true;
+    cur.psl = psl;
 
-// template <typename keyT, typename valueT>
-// bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT& value) {
+    while (true) {
+        if (!table[idx].isOccupied) {
+            // check if we need move's function or copy
+            table[idx] = std::move(cur);
+            ++size;
+            return true;
+        }
 
-//     int pos = hashFunction(key);
+        // if key already exists, append the value in the values vector
+        if (table[idx].isOccupied && table[idx].key == cur.key) {
+            table[idx].values.emplace_back(value);
+            // no size increment since it's the same key so return false ??? check it later
+            return false;
+        }
 
-//     // these three variables are the ones we are trying
-//     // to insert into the hash table each time
-//     keyT inputKey = key;
-//     valueT inputValue = value
-//     int inputPsl = psl;
 
-//     for(int i = pos; i < capacity; i = (i+1) % capacity){
-        
-//         // if position is empty, insert in node
-//         if(table[i].isOccupied == false){
+        if (table[idx].psl < cur.psl) {
+            std::swap(cur, table[idx]);
+            // cur is now displaced
+        }
 
-//             hashNode newNode;
-//             newNode.key = inputKey;
-//             newNode.value = inputValue;
-//             newNode.isOccupied = true;
-//             newNode.psl = inputPsl;
-            
-//             table[i] = newNode;
-//             size++;
+        ++cur.psl;
+        idx = (idx + 1) % capacity;
+    }
 
-//             return true;
-//         }
-//         else{
-//             hashNode& currNode = table[i];
-            
-//             // old key is "wealthier" so it needs to be replaced
-//             // by the new key which is "poorer"
-//             if(psl > currNode.psl){
-                
-//                 // store old key's info so we can move it
-//                 keyT oldKey = currNode.key;
-//                 valueT oldValue = currNode.value;
-//                 int oldPsl = currNode.psl;
-
-//                 // now insert new key into currNode
-//                 currNode.key = inputKey;
-//                 currNode.value = inputValue;
-//                 currNode.psl = psl;
-
-//                 // update input variables so the loop continues
-//                 // searching for a position for the old node
-//                 inputKey = oldKey;
-//                 inputValue = oldValue;
-//                 inputPsl = oldPsl;     
-                
-//             }
-//         }
-
-//         inputPsl++; // one position further from ideal position   
-            
-//     }
-
-// }
+    // unreachable
+    return false;
+}
