@@ -52,11 +52,12 @@ struct JoinAlgorithm {
 
                             // try to find the key in the hash table
                             if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                // append idx to the appropriate vector of the hash table
+                                // if not found, create new entry in hash table with idx
                                 hash_table.emplace(key, std::vector<size_t>(1, idx));
-
-                            // if not found, create new entry in hash table with idx
+                                
+                                
                             } else {
+                                // append idx to the appropriate vector of the hash table
                                 itr->second.push_back(idx);
                             }
                         } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
