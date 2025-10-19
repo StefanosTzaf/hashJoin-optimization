@@ -1,19 +1,24 @@
 #pragma once
 #include <vector>
 #include <optional>
+#include <iostream>
 
 
 template <class keyT, class valueT>
 class hashNode{
 
-    keyT   key;
-    valueT value;
-    bool   is_occupied; // indicates if the node is occupied
-    int psl; // probe sequence length
+    keyT                 key;
+    std::vector<valueT>  values;   // store all values for this key in case of duplicates
+    bool                 is_occupied; // indicates if the node is occupied
+    int                  psl; // probe sequence length
     
 public:
-    hashNode() : is_occupied(false), psl(0) {}
+    //constructor
+    hashNode() : is_occupied(false), psl(0) {
 
+    }
+
+    // GETTERS
     bool isOccupied() const{
         return is_occupied;
     }
@@ -22,14 +27,15 @@ public:
         return key;
     }
 
-    valueT getValue() const {
-        return value;
+    const std::vector<valueT>& getValue() const {
+        return values;
     }
 
     int getPsl() const {
         return psl;
     }
 
+    // SETTERS
     void setOccupied(bool status){
         is_occupied = status;
     }
@@ -42,8 +48,14 @@ public:
         key = newKey;
     }
 
-    void setValue(const valueT& newValue){
-        value = newValue;
+    // add a single value to the values vector
+    void addValuetoVector(const valueT& newValue){
+        values.emplace_back(newValue);
+    }
+
+    // set the entire values vector
+    void setValuesVector(const std::vector<valueT>& newValues){
+        values = newValues;
     }
 
 };
@@ -104,7 +116,8 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     // these three variables are the ones we are trying
     // to insert into the hash table each time
     keyT inputKey = key;
-    valueT inputValue = value;
+    // carry vector of values for the current key we're placing
+    std::vector<valueT> inputValues{value};
     int inputPsl = 0;
 
     for(int i = pos; i < capacity; i = (i+1) % capacity){
@@ -113,15 +126,26 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
         if((table[i].isOccupied()) == false){
 
             hashNode<keyT, valueT> newNode;
+            
             newNode.setKey(inputKey);
-            newNode.setValue(inputValue);
+            newNode.setValuesVector(inputValues); // set entire values vector
             newNode.setOccupied(true);
             newNode.setPsl(inputPsl);
 
             table[i] = newNode;
             size++;
-            return true; // inserted
+            return true; // setValue
         }
+        // if key already exists, append the value in the values vector
+        else if(table[i].isOccupied() && table[i].getKey() == inputKey){
+
+            table[i].addValuetoVector(value);
+            return true; // value added to existing key
+
+            // no size increment needed since it's the same key
+        }
+
+        // if position is occupied from a different key
         else{
             hashNode<keyT, valueT>& currNode = table[i];
             
@@ -131,18 +155,25 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
                 
                 // store old key's info so we can move it
                 keyT oldKey = currNode.getKey();
-                valueT oldValue = currNode.getValue();
+                std::vector<valueT> oldValues = currNode.getValue();
                 int oldPsl = currNode.getPsl();
 
                 // now insert new key into currNode
                 currNode.setKey(inputKey);
-                currNode.setValue(inputValue);
+                currNode.setValuesVector(inputValues);
                 currNode.setPsl(inputPsl);
 
                 // update input variables so the loop continues
-                // searching for a position for the old node
+                // searching for a position for the old key
                 inputKey = oldKey;
-                inputValue = oldValue;
+                inputValues = oldValues;
+                inputPsl = oldPsl;
+
+
+                // update input variables so the loop continues
+                // searching for a position for the old key
+                inputKey = oldKey;
+                inputValues = oldValues;
                 inputPsl = oldPsl;     
                 
             }
@@ -162,13 +193,29 @@ void RobinHoodHashTable<keyT, valueT>::printTable(){
     cout << "\n=== Hash Table State ===\n";
         
     for (int i = 0; i < capacity; ++i) {
-            if (table[i].isOccupied()){
+           
+        if (table[i].isOccupied()){
 
-                cout << "[" << i << "] key=" << table[i].getKey()
-                     << ", val=" << table[i].getValue()
-                     << ", psl=" << table[i].getPsl() << "\n";
+            // get vector of values
+            std::vector<valueT> values = table[i].getValue();
+            
+            cout << "[" << i << "] key=" << table[i].getKey();
+            
+            // if the vector is not empty, print its contents
+            if(values.size() > 0){
+                cout << ", Values: ";
+                for(const auto& val : values){
+                    cout << val << ", ";
+                }
             }
-            else
-                cout << "[" << i << "] EMPTY\n";
+
+            cout << "psl=" << table[i].getPsl() << "\n";
+                
+
+        }
+        else{
+            cout << "[" << i << "] EMPTY\n";
+        }
+        
         }
 }
