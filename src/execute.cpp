@@ -30,13 +30,13 @@ struct JoinAlgorithm {
         // STEP 1: the hash table for joining: type of join key, vector of row indexes that contain the key: 
         // one key might correspond to multiple rows
     // std::unordered_map<T, std::vector<size_t>> hash_table;
-    // choose an initial capacity based on build-side size to reduce rehashes
-    size_t initialCapacity = std::max<size_t>(16, left.size() * 2);
-    RobinHoodHashTable<T, size_t> hash_table(initialCapacity);
+ 
          // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
         // CALCULATE THE HASH VALUE OF EACH KEY AND STORE IT IN THE HASH TABLE
         // if we build on the left table
         if (build_left) {
+            RobinHoodHashTable<T, size_t> hash_table(left.size() * 2); // set initial capacity
+
 
             // iterates over all rows of left table with row index idx
             // record: the actual row
@@ -135,6 +135,8 @@ struct JoinAlgorithm {
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
         } else {
+
+            RobinHoodHashTable<T, size_t> hash_table(right.size() * 2); // set initial capacity
 
             for (auto&& [idx, record]: right | views::enumerate) {
                 std::visit(
