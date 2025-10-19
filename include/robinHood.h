@@ -2,6 +2,7 @@
 #include <vector>
 #include <optional>
 #include <iostream>
+#include <functional>
 
 #define MAX_LOAD_FACTOR 0.75
 
@@ -75,7 +76,7 @@ private:
     RobinHoodHashTable(size_t initialCapacity = 16);
     
     bool hashInsert(const keyT& key, const valueT& value);
-    bool hashSearch(const keyT& key, valueT& value) const;
+
     void rehash();
     void printTable(); // for debugging
 
@@ -110,7 +111,7 @@ RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity)
 
 template <typename keyT, typename valueT>
 size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const{
-    return key % capacity; // ΠΡΟΧΕΙΡΟ
+    return std::hash<keyT>{}(key) % capacity;
 }
 
 
