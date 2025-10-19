@@ -31,6 +31,18 @@ void test_RobinHood_insertion(){
     assert(inserted7);
     assert(inserted8);
 
+
+    // Search tests
+    vector<string> values1 = table.hashSearch(10);
+    assert(values1.size() == 2);
+    assert((values1[0] == "A" && values1[1] == "F"));
+
+    vector<string> values2 = table.hashSearch(17);
+    assert(values2.size() == 1);
+
+    vector<string> values3 = table.hashSearch(100);
+    assert(values3.size() == 0); // key not found
+
     table.printTable();
 
     // size should be 6 since one key was duplicate

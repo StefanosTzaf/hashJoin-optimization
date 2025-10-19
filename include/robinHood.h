@@ -11,7 +11,7 @@ class hashNode{
     keyT                 key;
     std::vector<valueT>  values;   // store all values for this key in case of duplicates
     bool                 is_occupied; // indicates if the node is occupied
-    int                  psl; // probe sequence length
+    size_t                  psl; // probe sequence length
     
 public:
     //constructor
@@ -79,10 +79,10 @@ private:
     void rehash();
     void printTable(); // for debugging
 
-    
-    // if not found, return std::nullopt 
-    //std::optional<valueT> hashSearch(const keyT& key) const;
-    
+
+    // if not found, return empty vector
+    std::vector<valueT> hashSearch(const keyT& key) const;
+
     //the second const declares that the function does not modify any member variables (read-only function)
     size_t hashFunction(const keyT& key) const;
 
@@ -127,7 +127,7 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     int inputPsl = 0;
 
     // circular iteration over the table
-    for(int i = pos; i < capacity; i = (i+1) % capacity){
+    for(size_t i = pos; i < capacity; i = (i+1) % capacity){
         
         // if position is empty, insert in node
         if((table[i].isOccupied()) == false){
@@ -193,6 +193,10 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
         }
 
         inputPsl++; // one position further from ideal position   
+
+        if (i == pos - 1) { // completed a full loop
+            break;
+        }
             
     }
 
@@ -203,7 +207,6 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
 template <typename keyT, typename valueT>
 void RobinHoodHashTable<keyT, valueT>::rehash(){
    
-    size_t oldCapacity = capacity;
     capacity *= 2; // double the capacity
 
     size = 0; // reset size, since it will be updated during re-insertions
@@ -229,6 +232,35 @@ void RobinHoodHashTable<keyT, valueT>::rehash(){
 }
 
 
+template <typename keyT, typename valueT>
+std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
+
+    size_t pos = hashFunction(key);
+    size_t currSpl = 0;
+
+    // circular probing
+    for(size_t i = pos; i < capacity; i = (i + 1) % capacity){
+
+        // if key found, return its values vector
+        if(table[i].isOccupied() == true && table[i].getKey() == key){
+            return table[i].getValue();
+            
+        }
+
+        // if we reach a node with psl less than currSpl, key not found
+        if(table[i].isOccupied() == true && table[i].getPsl() < currSpl){
+            return {}; // key not found
+        }
+
+        currSpl++; // one position further from ideal position
+
+        if (i == pos - 1) { // completed a full loop
+            break;
+        }
+    }
+    return {}; // key not found
+}
+
 
 
 template <typename keyT, typename valueT>
@@ -236,7 +268,7 @@ void RobinHoodHashTable<keyT, valueT>::printTable(){
 
     cout << "\n=== Hash Table State ===\n";
         
-    for (int i = 0; i < capacity; ++i) {
+    for (size_t i = 0; i < capacity; ++i) {
            
         if (table[i].isOccupied()){
 

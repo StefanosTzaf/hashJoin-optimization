@@ -1,6 +1,7 @@
 #include <hardware.h>
 #include <plan.h>
 #include <table.h>
+#include "robinHood.h"
 
 namespace Contest {
 
