@@ -55,7 +55,7 @@ public:
 
     // set the entire values vector
     void setValuesVector(const std::vector<valueT>& newValues){
-        values = newValues;
+        values = std::move(newValues);
     }
 
 };
@@ -120,6 +120,7 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     std::vector<valueT> inputValues{value};
     int inputPsl = 0;
 
+    // circular iteration over the table
     for(int i = pos; i < capacity; i = (i+1) % capacity){
         
         // if position is empty, insert in node
@@ -132,7 +133,7 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
             newNode.setOccupied(true);
             newNode.setPsl(inputPsl);
 
-            table[i] = newNode;
+            table[i] = std::move(newNode);
             size++;
             return true; // setValue
         }
