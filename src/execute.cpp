@@ -29,9 +29,8 @@ struct JoinAlgorithm {
 
         // STEP 1: the hash table for joining: type of join key, vector of row indexes that contain the key: 
         // one key might correspond to multiple rows
-    // std::unordered_map<T, std::vector<size_t>> hash_table;
  
-         // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
+        // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
         // CALCULATE THE HASH VALUE OF EACH KEY AND STORE IT IN THE HASH TABLE
         // if we build on the left table
         if (build_left) {
@@ -53,19 +52,9 @@ struct JoinAlgorithm {
 
                          // if the key's type matches the join type, insert it into hash table
                         if constexpr (std::is_same_v<Tk, T>) {
-
-                            // // try to find the key in the hash table
-                            // if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                            //     // append idx to the appropriate vector of the hash table
-                            //     hash_table.emplace(key, std::vector<size_t>(1, idx));
-
-                            // // if not found, create new entry in hash table with idx
-                            // } else {
-                            //     itr->second.push_back(idx);
-                            // }
-
                             // insert the row index; RobinHood stores a vector internally
                             hash_table.hashInsert(key, idx);
+
                         } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
                             throw std::runtime_error("wrong type of field");
                         }
@@ -92,7 +81,7 @@ struct JoinAlgorithm {
                             if (auto itr = hash_table.hashSearch(key); !itr.empty()) {
 
                                 // for each matching left row index from
-                                // itr->second: the vector with row indices
+                                // search returns the vector with values instantly and not std::pair<const Key, Value> like in unordered_map 
                                    for (auto left_idx: itr) {
                                     auto&             left_record = left[left_idx]; //get the whole left row
                                     std::vector<Data> new_record;
@@ -143,13 +132,8 @@ struct JoinAlgorithm {
                     [&hash_table, idx = idx](const auto& key) {
                         using Tk = std::decay_t<decltype(key)>;
                         if constexpr (std::is_same_v<Tk, T>) {
-                            // if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                            //     hash_table.emplace(key, std::vector<size_t>(1, idx));
-                            // } else {
-                            //     itr->second.push_back(idx);
-                            // }
-                            // insert the row index; RobinHood stores a vector internally
                             hash_table.hashInsert(key, idx);
+                            
                         } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
                             throw std::runtime_error("wrong type of field");
                         }

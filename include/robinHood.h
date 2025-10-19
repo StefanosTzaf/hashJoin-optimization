@@ -127,8 +127,9 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     std::vector<valueT> inputValues{value};
     int inputPsl = 0;
 
+    size_t i = pos;
     // circular iteration over the table
-    for(size_t i = pos; i < capacity; i = (i+1) % capacity){
+    while (true) {
         
         // if position is empty, insert in node
         if((table[i].isOccupied()) == false){
@@ -194,8 +195,8 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
         }
 
         inputPsl++; // one position further from ideal position   
-
-        if (i == pos - 1) { // completed a full loop
+        i = (i + 1) % capacity; // move to next position (circular)
+        if (i == pos) { // completed a full loop
             break;
         }
             
@@ -238,9 +239,9 @@ std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key
 
     size_t pos = hashFunction(key);
     size_t currSpl = 0;
-
+    size_t i = pos;
     // circular probing
-    for(size_t i = pos; i < capacity; i = (i + 1) % capacity){
+    while (true) {
 
         // if key found, return its values vector
         if(table[i].isOccupied() == true && table[i].getKey() == key){
@@ -254,8 +255,8 @@ std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key
         }
 
         currSpl++; // one position further from ideal position
-
-        if (i == pos - 1) { // completed a full loop
+        i = (i + 1) % capacity; // move to next position (circular)
+        if (i == pos)   { // completed a full loop
             break;
         }
     }
