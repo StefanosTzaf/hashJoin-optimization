@@ -35,6 +35,9 @@ struct JoinAlgorithm {
         // if we build on the left table
         if (build_left) {
 
+            size_t capacity =left.size();
+            hash_table.reserve(capacity);
+
             // iterates over all rows of left table with row index idx
             // record: the actual row
             for (auto&& [idx, record]: left | views::enumerate) {
@@ -129,6 +132,10 @@ struct JoinAlgorithm {
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
         } else {
+
+            size_t capacity = right.size();
+            hash_table.reserve(capacity);
+
             for (auto&& [idx, record]: right | views::enumerate) {
                 std::visit(
                     [&hash_table, idx = idx](const auto& key) {
