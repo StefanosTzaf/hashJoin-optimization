@@ -3,6 +3,7 @@
 #include <optional>
 #include <iostream>
 
+#define MAX_LOAD_FACTOR 0.75
 
 template <class keyT, class valueT>
 class hashNode{
@@ -77,6 +78,7 @@ private:
     bool hashSearch(const keyT& key, valueT& value) const;
     void rehash();
     void printTable(); // for debugging
+
     
     // if not found, return std::nullopt 
     //std::optional<valueT> hashSearch(const keyT& key) const;
@@ -86,6 +88,10 @@ private:
 
     size_t getSize() const {
         return size;
+    }
+
+    float getLoadFactor() const {
+        return static_cast<float>(size) / static_cast<float>(capacity);
     }
 
 };
@@ -135,6 +141,12 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
 
             table[i] = std::move(newNode);
             size++;
+
+            // check load factor and rehash if needed
+            if(getLoadFactor() >= MAX_LOAD_FACTOR){
+                rehash();
+            }
+
             return true; // setValue
         }
         // if key already exists, append the value in the values vector
@@ -187,6 +199,37 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     return false; // full table
 
 }
+
+template <typename keyT, typename valueT>
+void RobinHoodHashTable<keyT, valueT>::rehash(){
+   
+    size_t oldCapacity = capacity;
+    capacity *= 2; // double the capacity
+
+    size = 0; // reset size, since it will be updated during re-insertions
+
+    // move old table to a temporary variable
+    std::vector<hashNode<keyT, valueT>> oldTable = std::move(table);
+    
+    // create new table with updated capacity
+    table = std::vector<hashNode<keyT, valueT>>(capacity);
+
+    // for each node in old table
+    for (const auto& node : oldTable) {
+
+        // Skip empty nodes
+        if (node.isOccupied()) {
+
+            // for each value in the values vector of the node, reinsert
+            for (const auto& value : node.getValue()) {
+                hashInsert(node.getKey(), value);
+            }
+        }
+    }
+}
+
+
+
 
 template <typename keyT, typename valueT>
 void RobinHoodHashTable<keyT, valueT>::printTable(){
