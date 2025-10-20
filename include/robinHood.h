@@ -12,7 +12,7 @@ class hashNode{
     keyT                 key;
     std::vector<valueT>  values;   // store all values for this key in case of duplicates
     bool                 is_occupied; // indicates if the node is occupied
-    size_t                  psl; // probe sequence length
+    size_t               psl; // probe sequence length
     
 public:
     //constructor
@@ -33,7 +33,7 @@ public:
         return values;
     }
 
-    int getPsl() const {
+    size_t getPsl() const {
         return psl;
     }
 
@@ -42,12 +42,12 @@ public:
         is_occupied = status;
     }
 
-    void setPsl(int newPsl){
+    void setPsl(size_t newPsl){
         psl = newPsl;
     }
 
     void setKey(const keyT& newKey){
-        key = newKey;
+        key = std::move(newKey);
     }
 
     // add a single value to the values vector
@@ -56,9 +56,14 @@ public:
     }
 
     // set the entire values vector. As a setter is not exepted to modify its input(no move call)
-    void setValuesVector(const std::vector<valueT>& newValues){
-        values = newValues;
+    void setValuesVector(const std::vector<valueT>&& newValues){
+        values = std::move(newValues);
     }
+
+    // hash table class needs access to private members for swapping
+    // for the swap operation during insertion
+    template <class keyT2, class valueT2>
+    friend class RobinHoodHashTable;
 
 };
 
@@ -118,14 +123,14 @@ size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const{
 template <typename keyT, typename valueT>
 bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT& value) {
 
-    int pos = hashFunction(key);
+    size_t pos = hashFunction(key);
 
     // these three variables are the ones we are trying
     // to insert into the hash table each time
     keyT inputKey = key;
     // carry vector of values for the current key we're placing
     std::vector<valueT> inputValues{value};
-    int inputPsl = 0;
+    size_t inputPsl = 0;
 
     size_t i = pos;
     // circular iteration over the table
@@ -133,15 +138,12 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
         
         // if position is empty, insert in node
         if((table[i].isOccupied()) == false){
-
-            hashNode<keyT, valueT> newNode;
             
-            newNode.setKey(inputKey);
-            newNode.setValuesVector(inputValues); // set entire values vector
-            newNode.setOccupied(true);
-            newNode.setPsl(inputPsl);
+            table[i].setKey(inputKey);
+            table[i].setValuesVector(std::move(inputValues)); // set entire values vector
+            table[i].setOccupied(true);
+            table[i].setPsl(inputPsl);
 
-            table[i] = std::move(newNode);
             size++;
 
             // check load factor and rehash if needed
@@ -162,28 +164,20 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
 
         // if position is occupied from a different key
         else{
-            hashNode<keyT, valueT>& currNode = table[i];
             
             // old key is "wealthier" so it needs to be replaced
             // by the new key which is "poorer"
-            if(inputPsl > currNode.getPsl()){
-                
-                // Use std::move for better performance
-                keyT oldKey = std::move(currNode.getKey());
-                std::vector<valueT> oldValues = std::move(currNode.getValue());
-                int oldPsl = currNode.getPsl();
-
-                // now insert new key into currNode using move semantics
-                currNode.setKey(std::move(inputKey));
-                currNode.setValuesVector(std::move(inputValues));
-                currNode.setPsl(inputPsl);
+            if(inputPsl > table[i].getPsl()){
 
                 // update input variables so the loop continues
                 // searching for a position for the old key
-                inputKey = std::move(oldKey);
-                inputValues = std::move(oldValues);
-                inputPsl = oldPsl;
-                
+
+                // exchanges the values of two objects efficiently
+                // it uses move internally and not copy
+                std::swap(inputKey, table[i].key);
+                std::swap(inputValues, table[i].values);
+                std::swap(inputPsl, table[i].psl);
+
             }
         }
 
