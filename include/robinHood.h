@@ -55,9 +55,9 @@ public:
         values.emplace_back(newValue);
     }
 
-    // set the entire values vector
+    // set the entire values vector. As a setter is not exepted to modify its input(no move call)
     void setValuesVector(const std::vector<valueT>& newValues){
-        values = std::move(newValues);
+        values = newValues;
     }
 
 };
@@ -92,7 +92,7 @@ private:
     }
 
     float getLoadFactor() const {
-        return static_cast<float>(size) / static_cast<float>(capacity);
+        return capacity ? static_cast<float>(size) / static_cast<float>(capacity) : 0.0f;
     }
 
 };
@@ -106,12 +106,12 @@ using namespace std;
 template <typename keyT, typename valueT>
 // dynamically allocate table(vector)
 RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity)
-    : capacity(initialCapacity), size(0), table(capacity) {
+    : capacity(initialCapacity == 0 ? 1 : initialCapacity), size(0), table(capacity) {
 }
 
 template <typename keyT, typename valueT>
 size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const{
-    return std::hash<keyT>{}(key) % capacity;
+    return capacity ? (std::hash<keyT>{}(key) % capacity) : 0;
 }
 
 
@@ -168,28 +168,21 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
             // by the new key which is "poorer"
             if(inputPsl > currNode.getPsl()){
                 
-                // store old key's info so we can move it
-                keyT oldKey = currNode.getKey();
-                std::vector<valueT> oldValues = currNode.getValue();
+                // Use std::move for better performance
+                keyT oldKey = std::move(currNode.getKey());
+                std::vector<valueT> oldValues = std::move(currNode.getValue());
                 int oldPsl = currNode.getPsl();
 
-                // now insert new key into currNode
-                currNode.setKey(inputKey);
-                currNode.setValuesVector(inputValues);
+                // now insert new key into currNode using move semantics
+                currNode.setKey(std::move(inputKey));
+                currNode.setValuesVector(std::move(inputValues));
                 currNode.setPsl(inputPsl);
 
                 // update input variables so the loop continues
                 // searching for a position for the old key
-                inputKey = oldKey;
-                inputValues = oldValues;
+                inputKey = std::move(oldKey);
+                inputValues = std::move(oldValues);
                 inputPsl = oldPsl;
-
-
-                // update input variables so the loop continues
-                // searching for a position for the old key
-                inputKey = oldKey;
-                inputValues = oldValues;
-                inputPsl = oldPsl;     
                 
             }
         }
@@ -242,15 +235,20 @@ std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key
     size_t i = pos;
     // circular probing
     while (true) {
+        const auto& node = table[i];
+        
+        // If position is empty, key definitely not found
+        if (!node.isOccupied()) {
+            return {};
+        }
 
         // if key found, return its values vector
-        if(table[i].isOccupied() == true && table[i].getKey() == key){
-            return table[i].getValue();
-            
+        if(node.getKey() == key) {
+            return node.getValue();
         }
 
         // if we reach a node with psl less than currSpl, key not found
-        if(table[i].isOccupied() == true && table[i].getPsl() < currSpl){
+        if(node.getPsl() < currSpl) {
             return {}; // key not found
         }
 
