@@ -61,7 +61,13 @@ class hashNode{
             hopInfo[index] = true;
         }
     }
+
+    void setHopInfoPosToFalse(const size_t& index){
     
+        if(index < hopInfo.size()){
+            hopInfo[index] = false;
+        }
+    }
 
      // set the entire values vector
     void setValuesVector( std::vector<valueT>&& newValues){
@@ -102,7 +108,7 @@ class Hopscotch{
     // extra functions
 
     // checks if the original hashed position is free
-    // if so, inserts the key-value pair there and sets up hop info bitmap
+    // if so, inserts the key-value pair there and sets up hop info bitmap and returns true
     bool insertInOriginalPos(size_t pos, keyT& key, valueT& value);
 
     // returns true if all slots in bitmap hop info are occupied
@@ -111,6 +117,14 @@ class Hopscotch{
     // finds the next free slot starting from startPos
     // and returns its index or capacity if none found
     size_t findFreeSlot(size_t startPos) const;
+
+    // checks if free slot is within hop range of hashed position
+    // if so, inserts the key-value pair there and updates hop info bitmap and returns true
+    bool insertWithinHopRange(size_t freeSlot, size_t hashedPos, keyT& key, valueT& value);
+
+    const std::vector<valueT> hashSearch(const keyT& key) const;
+
+
 
 };
 
@@ -179,6 +193,25 @@ size_t Hopscotch<keyT, valueT>::findFreeSlot(size_t startPos) const{
     }
 }
 
+template <typename keyT, typename valueT>
+bool Hopscotch<keyT, valueT>::insertWithinHopRange(size_t freeSlot, size_t hashedPos, keyT& key, valueT& value){
+
+    if((freeSlot - hashedPos) % capacity < hopRange){
+
+        table[freeSlot].setKey(std::move(key));
+        table[freeSlot].addValuetoVector(value);
+        table[freeSlot].setOccupied(true);
+        table[freeSlot].initializeHopInfo(hopRange);
+    
+        size++;
+
+        // update hop info bitmap at original position
+        table[pos].setHopInfoPosToTrue(freeSlot - pos);
+        return true;
+    }
+    
+    return false;
+}
 
 
 
@@ -202,24 +235,67 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
     // search for a free slot
     size_t freeSlot = findFreeSlot(pos);
 
-    // ?????????????
     if(freeSlot == capacity){ // no free slot found
         rehash();
         return hashInsert(key, value);
     }
 
     // free slot is within hop range, insert directly
-    if((freeSlot - pos) % capacity < hopRange){ 
-        
-        table[freeSlot].setKey(std::move(key));
-        table[freeSlot].addValuetoVector(value);
-        table[freeSlot].setOccupied(true);
-        table[freeSlot].initializeHopInfo(hopRange);
-    
-        size++;
+    if(insertWithinHopRange(freeSlot, pos, key, value) == true){
+        return true;
+    }
 
-        // update hop info bitmap at original position
-        table[pos].setHopInfoPosToTrue(freeSlot - pos);
+    // the free slot is outside hop range, now we should move elements
+    bool moved = false;
+    while((freeSlot - pos) % capacity >= hopRange){
+
+        size_t startH = freeSlot - hopRange + 1; // the first out of H-1 slots prior to freeSlot
+
+        size_t slotToMove = capacity; // initialize to invalid index
+
+        for(size_t i = startH; i < freeSlot; i++){
+            
+            auto& bitmap = table[i].getHopInfo();
+            size_t bitIndex = 0;
+            
+            while(true){
+               
+                // we should check only bits that correspond to slots before freeSlot
+                if(bitIndex + i >= hopRange){
+                    break;
+                }
+
+                if(bitmap[bitIndex] == true){
+                    slotToMove = i + bitIndex;
+
+                    // swap the empty slot with the slotToMove
+                    table[freeSlot].setKey(std::move(table[slotToMove].getKey()));
+                    table[freeSlot].setValuesVector(std::move(table[slotToMove].getValue()));
+                    table[freeSlot].setOccupied(true);
+                    
+                    table[i].setHopInfoPosToTrue(freeSlot - slotToMove + 1); // update hop info bitmap for new position
+                    
+                    table[slotToMove].setOccupied(false); // mark old position as free
+                    table[i].setHopInfoPosToFalse(bitIndex); // update hop info bitmap for old position
+
+                    // update variables for next iteration
+                    freeSlot = slotToMove;
+                    moved = true;
+                    break;
+                }
+
+                bitIndex++; // check next bit
+            }
+
+            if (moved == true){
+                freeSlot = slotToMove;
+                break;
+            }
+        }
+    }
+
+    // now the free slot is within hop range, insert the new key-value pair
+    if(insertWithinHopRange(freeSlot, pos, key, value) == true){
         return true;
     }
 
@@ -228,3 +304,32 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
 
 }
 
+
+template <typename keyT, typename valueT>
+const std::vector<valueT> Hopscotch<keyT, valueT>::hashSearch(const keyT& key) const{
+    
+    size_t pos = hashFunction(key);
+
+    // check if the key at hashed position matches
+    if(table[pos].isOccupied() && table[pos].getKey() == key){
+        return table[pos].getValue();
+    }
+
+    // check other positions within hop range
+    auto& hopInfo = table[pos].getHopInfo();
+
+    for(size_t i = 1; i < hopRange; ++i){
+
+        if(hopInfo[i] == true){ // slot is occupied by an element that hashed here
+
+            size_t checkPos = (pos + i) % capacity;
+
+            if(table[checkPos].isOccupied() && table[checkPos].getKey() == key){
+                return table[checkPos].getValue();
+            }
+        }
+    }
+
+    // key not found, return empty vector
+    return std::vector<valueT>();
+}
