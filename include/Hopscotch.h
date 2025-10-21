@@ -103,7 +103,7 @@ class Hopscotch{
 
     // checks if the original hashed position is free
     // if so, inserts the key-value pair there and sets up hop info bitmap
-    bool insertInOriginalPos(std::vector<hashNode<keyT, valueT>>& table, size_t pos);
+    bool insertInOriginalPos(size_t pos, keyT& key, valueT& value);
 
     // returns true if all slots in bitmap hop info are occupied
     bool isHopInfoFull(size_t pos) const;
@@ -127,7 +127,7 @@ size_t Hopscotch<keyT, valueT>::hashFunction(const keyT& key) const{
 
 
 template <typename keyT, typename valueT>
-bool insertInOriginalPos(std::vector<hashNode<keyT, valueT>>& table, size_t pos){
+bool Hopscotch<keyT, valueT>::insertInOriginalPos(size_t pos, keyT& key, valueT& value){
     
     // if the hashed position is free, insert directly
     if(table[pos].isOccupied() == false){
@@ -189,13 +189,14 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
     size_t pos = hashFunction(key);
 
     // if the original hashed position is free, insert there
-    if (insertInOriginalPos(table, pos) == true) {
+    if (insertInOriginalPos(pos, key, value) == true) {
         return true;
     }
 
     // check if hop info is full, if so table is full and needs rehashing
    if(isHopInfoFull(pos) == true){
         rehash();
+        return hashInsert(key, value);
     }
 
     // search for a free slot
@@ -204,6 +205,7 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
     // ?????????????
     if(freeSlot == capacity){ // no free slot found
         rehash();
+        return hashInsert(key, value);
     }
 
     // free slot is within hop range, insert directly
