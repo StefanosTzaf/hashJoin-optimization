@@ -20,34 +20,52 @@ public:
 
     }
 
-    // GETTERS
-    bool isOccupied() const{
+    //#### GETTERS ####//
+
+    // getters are marked as inline functions to 
+    // reduce function call overhead for small functions
+
+    inline bool isOccupied() const{
         return is_occupied;
     }
 
-    keyT getKey() const {
+    inline const keyT& getKey() const {
         return key;
     }
 
-    const std::vector<valueT>& getValue() const {
+    // returns a reference to the values vector meaning no copy is made
+    // const before the method: the caller cannot modify the returned vector
+    // const after the method: the method does not modify any member variables
+    inline const std::vector<valueT>& getValue() const {
         return values;
     }
 
-    size_t getPsl() const {
+    inline size_t getPsl() const {
         return psl;
     }
 
-    // SETTERS
-    void setOccupied(bool status){
+    // ##### SETTERS #### //
+    inline void setOccupied(bool status){
         is_occupied = status;
     }
 
-    void setPsl(size_t newPsl){
+    inline void setPsl(const size_t newPsl){
         psl = newPsl;
     }
 
-    void setKey(const keyT& newKey){
+    // move instead of copy:
+    // std::move casts from lvalue to rvalue, the source object is left in a valid but unspecified state
+    // Use of move requires rvalue reference
+    // rvalue reference &&: binds to a temporary object allowing move semantics
+    // no need for const reference since moving modifies the source
+    
+    void setKey( keyT&& newKey){
         key = std::move(newKey);
+    }
+    
+    // set the entire values vector
+    void setValuesVector( std::vector<valueT>&& newValues){
+        values = std::move(newValues);
     }
 
     // add a single value to the values vector
@@ -55,12 +73,7 @@ public:
         values.emplace_back(newValue);
     }
 
-    // set the entire values vector. As a setter is not exepted to modify its input(no move call)
-    void setValuesVector(const std::vector<valueT>&& newValues){
-        values = std::move(newValues);
-    }
-
-    // hash table class needs access to private members for swapping
+    // hash table class needs access to private members
     // for the swap operation during insertion
     template <class keyT2, class valueT2>
     friend class RobinHoodHashTable;
@@ -86,13 +99,13 @@ private:
     void printTable(); // for debugging
 
 
-    // if not found, return empty vector
-    std::vector<valueT> hashSearch(const keyT& key) const;
+    // returns vector of values for the given key
+    const std::vector<valueT> hashSearch(const keyT& key) const;
 
     //the second const declares that the function does not modify any member variables (read-only function)
     size_t hashFunction(const keyT& key) const;
 
-    size_t getSize() const {
+    inline size_t getSize() const {
         return size;
     }
 
@@ -106,7 +119,7 @@ private:
 
 // implementation of hash table with Robin Hood hashing
 
-using namespace std;
+// using namespace std;
 
 template <typename keyT, typename valueT>
 // dynamically allocate table(vector)
@@ -130,17 +143,18 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
     keyT inputKey = key;
     // carry vector of values for the current key we're placing
     std::vector<valueT> inputValues{value};
+    
     size_t inputPsl = 0;
-
     size_t i = pos;
+    
     // circular iteration over the table
     while (true) {
         
         // if position is empty, insert in node
         if((table[i].isOccupied()) == false){
             
-            table[i].setKey(inputKey);
-            table[i].setValuesVector(std::move(inputValues)); // set entire values vector
+            table[i].setKey(std::move(inputKey)); 
+            table[i].setValuesVector(std::move(inputValues)); // efficient move
             table[i].setOccupied(true);
             table[i].setPsl(inputPsl);
 
@@ -221,8 +235,9 @@ void RobinHoodHashTable<keyT, valueT>::rehash(){
 }
 
 
+// returns the vector of values for the given key
 template <typename keyT, typename valueT>
-std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
+const std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
 
     size_t pos = hashFunction(key);
     size_t currSpl = 0;
@@ -260,31 +275,31 @@ std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key
 template <typename keyT, typename valueT>
 void RobinHoodHashTable<keyT, valueT>::printTable(){
 
-    cout << "\n=== Hash Table State ===\n";
+    std::cout << "\n=== Hash Table State ===\n";
         
     for (size_t i = 0; i < capacity; ++i) {
            
         if (table[i].isOccupied()){
 
             // get vector of values
-            std::vector<valueT> values = table[i].getValue();
+            const std::vector<valueT>& values = table[i].getValue();
             
-            cout << "[" << i << "] key=" << table[i].getKey();
+            std::cout << "[" << i << "] key=" << table[i].getKey();
             
             // if the vector is not empty, print its contents
             if(values.size() > 0){
-                cout << ", Values: ";
+                std::cout << ", Values: ";
                 for(const auto& val : values){
-                    cout << val << ", ";
+                    std::cout << val << ", ";
                 }
             }
 
-            cout << "psl=" << table[i].getPsl() << "\n";
+            std::cout << "psl=" << table[i].getPsl() << "\n";
                 
 
         }
         else{
-            cout << "[" << i << "] EMPTY\n";
+            std::cout << "[" << i << "] EMPTY\n";
         }
         
         }
