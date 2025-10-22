@@ -124,12 +124,40 @@ private:
 template <typename keyT, typename valueT>
 // dynamically allocate table(vector)
 RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity)
-    : capacity(initialCapacity == 0 ? 1 : initialCapacity), size(0), table(capacity) {
+    : size(0) {
+    // Round up to next power of 2
+    capacity = 16; // minimum size
+    while (capacity < initialCapacity) {
+        capacity *= 2;
+    }
+    table.resize(capacity);
 }
 
 template <typename keyT, typename valueT>
-size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const{
-    return capacity ? (std::hash<keyT>{}(key) % capacity) : 0;
+size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const {
+    // Use std::hash first
+    size_t hash = std::hash<keyT>{}(key);
+    
+    // FNV-1a hash mixing
+    constexpr size_t FNV_prime = 1099511628211ULL;
+    constexpr size_t FNV_offset = 14695981039346656037ULL;
+    
+    hash = (hash ^ FNV_offset) * FNV_prime;
+    hash = (hash ^ (hash >> 32)) * FNV_prime;
+    
+        // Fibonacci hashing for better distribution
+    constexpr size_t golden_ratio = 11400714819323198485ULL;
+    
+    // Calculate leading zeros manually instead of using bit_width
+    size_t shift = 0;
+    size_t temp = capacity;
+    while (temp > 1) {
+        temp >>= 1;
+        shift++;
+    }
+    
+    hash = (hash * golden_ratio) >> (64 - shift);
+    return hash & (capacity - 1); // Faster than modulo if capacity is power of 2
 }
 
 
@@ -209,8 +237,8 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
 
 template <typename keyT, typename valueT>
 void RobinHoodHashTable<keyT, valueT>::rehash(){
-   
-    capacity *= 2; // double the capacity
+    // Capacity is already power of 2, so just double it
+    capacity *= 2;
 
     size = 0; // reset size, since it will be updated during re-insertions
 
