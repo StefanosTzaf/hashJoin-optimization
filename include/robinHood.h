@@ -105,6 +105,10 @@ private:
     //the second const declares that the function does not modify any member variables (read-only function)
     size_t hashFunction(const keyT& key) const;
 
+    size_t getSize() const{
+        return size;
+    }
+
     float getLoadFactor() const {
         return capacity ? static_cast<float>(size) / static_cast<float>(capacity) : 0.0f;
     }
