@@ -3,6 +3,21 @@
 #include <iostream>
 #define MAX_LOAD_FACTOR 0.5
 
+// Helper function: returns the smallest power of 2 >= n
+// is used in Capacity of hash tables
+inline size_t nextPowerOf2(size_t n) {
+    if (n == 0) return 1;
+    // Check if already a power of 2
+    if ((n & (n - 1)) == 0) {
+        return n;
+    }
+    // Find the next power of 2
+    size_t power = 1;
+    while (power < n) {
+        power <<= 1;
+    }
+    return power;
+}
 
 template <class keyT, class valueT>
 class hashNode{
@@ -133,6 +148,10 @@ class CuckooHashTable {
 
         valueT hashSearch(const keyT& key) const;
 
+        // Returns mutable pointer to value for key. Returns nullptr if key not found.
+        // Is needed in execute.cpp (acts like itr->second for unordered map)
+        valueT* getMutable(const keyT& key);
+
         void rehash();      
 
 
@@ -167,7 +186,8 @@ CuckooHashTable<keyT, valueT>::CuckooHashTable(size_t initialCapacity,
     if(initialCapacity == 0) {
         initialCapacity = 16;
     }
-    capacity = initialCapacity;
+
+    capacity = nextPowerOf2(initialCapacity);
     size = 0;
     table1 = std::vector<hashNode<keyT, valueT>>(capacity);
     table2 = std::vector<hashNode<keyT, valueT>>(capacity);
@@ -342,4 +362,23 @@ void CuckooHashTable<keyT, valueT>::displayTable() {
         std::cout << std::endl;
     }
     std::cout << std::endl;
+}
+
+
+template <class keyT, class valueT>
+valueT* CuckooHashTable<keyT, valueT>::getMutable(const keyT& key) {
+    // Check first table
+    size_t pos1 = hash1(key);
+    if (table1[pos1].isOccupied() && table1[pos1].getKey() == key) {
+        return const_cast<valueT*>(&table1[pos1].getValue());
+    }
+    
+    // Check second table
+    size_t pos2 = hash2(key);
+    if (table2[pos2].isOccupied() && table2[pos2].getKey() == key) {
+        return const_cast<valueT*>(&table2[pos2].getValue());
+    }
+    
+    // Key not found - return nullptr
+    return nullptr;
 }
