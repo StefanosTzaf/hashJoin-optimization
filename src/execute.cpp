@@ -1,7 +1,7 @@
 #include <hardware.h>
 #include <plan.h>
 #include <table.h>
-
+#include "cuckoo.h"
 namespace Contest {
 
 // similar to typedef: write ExecuteResult instead of std::vector<std::vector<Data>>
