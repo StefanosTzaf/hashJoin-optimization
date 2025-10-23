@@ -292,12 +292,12 @@ void CuckooHashTable<keyT, valueT>::rehash() {
 //TODO : does it have to be const the return value?????
 template <class keyT, class valueT>
 valueT CuckooHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
-    size_t pos1 = hashFunction1(key);
+    size_t pos1 = hash1(key);
     const auto& node1 = table1[pos1];
     if(node1.isOccupied() && node1.getKey() == key) {
         return node1.getValue();
     }
-    size_t pos2 = hashFunction2(key);
+    size_t pos2 = hash2(key);
     const auto& node2 = table2[pos2];
     if(node2.isOccupied() && node2.getKey() == key) {
         return node2.getValue();

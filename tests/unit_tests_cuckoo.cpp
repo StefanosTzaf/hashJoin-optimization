@@ -23,6 +23,7 @@ void checkPosition(const CuckooHashTable<int, string>& table,
     assert(pos.second == expectedPos);
 }
 
+// Testing insertions with collisions, kicks and rehashing due to cycles
 void test1(){ 
     // Χρησιμοποιούμε capacity=16 για να μην κάνει rehash λόγω load factor
     // 5 στοιχεία σε capacity 16 => load factor = 5/(16*2) = 0.15625 < 0.5
@@ -77,6 +78,7 @@ void test1(){
     cout<< "Test with Collisions, Kicks and rehashing due to cycles passed successfully!" << endl;
 }
 
+// Testing rehashing due to load factor
 void test2(){
     CuckooHashTable<int, string> cuckooTable(4, testHash1, testHash2);
     cuckooTable.hashInsert(1, "Greece");
@@ -107,6 +109,7 @@ void test2(){
     cout << "Test with Rehashing due to Load Factor passed successfully!" << endl;
 }
 
+// Testing with Default Hash Functions
 void test3(){
     CuckooHashTable<int, string> cuckooTable(4);
     assert(cuckooTable.getCapacity() == 4);
@@ -127,9 +130,33 @@ void test3(){
 
     cout << "Test with Default Hash Functions passed successfully!" << endl;
 }
+
+// Testing with string keys, and search function
+void test4(){
+    CuckooHashTable<string, int> cuckooTable(4);
+    cuckooTable.hashInsert("apple", 1);
+    cuckooTable.hashInsert("banana", 2);
+    cuckooTable.hashInsert("orange", 3);
+    cuckooTable.hashInsert("grape", 4);
+    cuckooTable.hashInsert("melon", 5);
+    
+    assert(cuckooTable.getSize() == 5);
+    assert(cuckooTable.getCapacity() >= 8);
+    //search tests
+    assert(cuckooTable.hashSearch("apple") == 1);
+    assert(cuckooTable.hashSearch("banana") == 2);
+    assert(cuckooTable.hashSearch("orange") == 3);
+    assert(cuckooTable.hashSearch("grape") == 4);
+    assert(cuckooTable.hashSearch("melon") == 5);
+    assert(cuckooTable.hashSearch("kiwi") == 0); // not found
+    cout << "Test with String Keys and Search Function passed successfully!" << endl;
+    
+}
+
 int main(){
     test1();
     test2();
     test3();
+    test4();
     return 0;
 }
