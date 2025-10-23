@@ -199,14 +199,19 @@ bool CuckooHashTable<keyT, valueT>::hashInsert(const keyT& inputKey, const value
             size_t pos1 = hash1(key);
             auto& node1 = table1[pos1];
 
-            // just insert the key,value if position is empty or key already exists
+            // just insert the key,value if position is empty
             if (!node1.isOccupied()) {
                 node1.setKey(key);
                 node1.setValue(value);
                 node1.setOccupied(true);
                 size++;
                 return true;
-            } 
+            }
+            // if same key exists, just update the value
+            else if (node1.getKey() == key) {
+                node1.setValue(value);
+                return true;
+            }
            // if occupied by different key we insert the new one but first keeping the old one to reinsert to the other table
             else {
                 // Kick out existing element
@@ -235,7 +240,12 @@ bool CuckooHashTable<keyT, valueT>::hashInsert(const keyT& inputKey, const value
                 node2.setOccupied(true);
                 size++;
                 return true;
-            } 
+            }
+            // if same key exists, just update the value
+            else if (node2.getKey() == key) {
+                node2.setValue(value);
+                return true;
+            }
             // if occupied by different key we insert the new one but first keeping the old one to reinsert to the other table
             else {
                 // Kick out existing element
@@ -257,9 +267,13 @@ bool CuckooHashTable<keyT, valueT>::hashInsert(const keyT& inputKey, const value
         // it means we are in a cycle, we need a larger table
         if(currentKicks >= maxKicks){
             rehash();
+            // After rehash, restart the insertion with the current key/value pair
+            maxKicks = size + 1;
+            currentKicks = 0;
+            tableToSearch = true;
         }
     }
-    
+    return true;
 }
 
 template <class keyT, class valueT>
