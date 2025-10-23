@@ -63,20 +63,50 @@ class CuckooHashTable {
         HashFunction<keyT> hashFunc2;
 
     public:
+        //constructor with default hash functions
+        CuckooHashTable(size_t initialCapacity, 
+                    HashFunction<keyT> h1 = defaultHash1,
+                    HashFunction<keyT> h2 = defaultHash2);
+
+    
         // Default hash functions defined as static methods
         //As static methods are written one time for all instances of the class (less memory)
         static size_t defaultHash1(const keyT& key, size_t cap) {
-            return 0;
+            // Use std::hash first, so as to work with all types
+            size_t hash = std::hash<keyT>{}(key);
+            
+            // FNV-1a hash mixing
+            constexpr size_t FNV_prime = 1099511628211ULL;
+            constexpr size_t FNV_offset = 14695981039346656037ULL;
+            
+            hash = (hash ^ FNV_offset) * FNV_prime;
+            hash = (hash ^ (hash >> 32)) * FNV_prime;
+            
+            // Fibonacci hashing for better distribution
+            constexpr size_t golden_ratio = 11400714819323198485ULL;
+            
+            // Calculate leading zeros
+            size_t shift = 0;
+            size_t temp = cap;
+            while (temp > 1) {
+                temp >>= 1;
+                shift++;
+            }
+            
+            hash = (hash * golden_ratio) >> (64 - shift);
+            return hash & (cap - 1); // Faster than modulo if capacity is power of 2
         }
         
         static size_t defaultHash2(const keyT& key, size_t cap) {
-            return 0;
+            // Hash2: SplitMix64 mix of a different seed to decorrelate from Hash1
+            uint64_t x = static_cast<uint64_t>(std::hash<keyT>{}(key)) ^ 0x9E3779B97F4A7C15ULL;
+            x += 0x9E3779B97F4A7C15ULL;
+            x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+            x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+            x =  x ^ (x >> 31);
+            return static_cast<size_t>(x) & (cap - 1);
         }
 
-        //constructor with default hash functions
-        CuckooHashTable(size_t initialCapacity, 
-                       HashFunction<keyT> h1 = defaultHash1,
-                       HashFunction<keyT> h2 = defaultHash2);
 
         // Hash function wrappers - encapsulation logic
         size_t hash1(const keyT& key) const {
@@ -99,6 +129,14 @@ class CuckooHashTable {
             return capacity;
         }
 
+        bool hashInsert(const keyT& inputKey, const valueT& inputValue);
+
+        valueT hashSearch(const keyT& key) const;
+
+        void rehash();      
+
+
+    //------------------------------TESTING ASSOSCIATED METHODS-------------------------------------//
         // returns in which table and position the key is found. useful for testing!!
         std::pair<int, size_t> findPosition(const keyT& key) const {
             size_t pos1 = hash1(key);
@@ -114,12 +152,6 @@ class CuckooHashTable {
             return {0, 0};
         }
 
-        bool hashInsert(const keyT& inputKey, const valueT& inputValue);
-
-        valueT hashSearch(const keyT& key) const;
-
-        void rehash();      
-
         void displayTable(); // for debugging
 };
 
@@ -131,6 +163,7 @@ CuckooHashTable<keyT, valueT>::CuckooHashTable(size_t initialCapacity,
                                               HashFunction<keyT> h2)
     : hashFunc1(h1)
     , hashFunc2(h2) {
+        
     if(initialCapacity == 0) {
         initialCapacity = 16;
     }

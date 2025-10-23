@@ -107,9 +107,29 @@ void test2(){
     cout << "Test with Rehashing due to Load Factor passed successfully!" << endl;
 }
 
+void test3(){
+    CuckooHashTable<int, string> cuckooTable(4);
+    assert(cuckooTable.getCapacity() == 4);
+    assert(cuckooTable.getSize() == 0);
+    cuckooTable.hashInsert(1, "Greece");
+    cuckooTable.hashInsert(2, "France");
+    cuckooTable.hashInsert(3, "Uganda");
+    cuckooTable.hashInsert(4, "Burundi");
+    cuckooTable.hashInsert(5, "Palau");
+    cuckooTable.hashInsert(6, "Norway");
+    cuckooTable.hashInsert(7, "Sweden");
+    cuckooTable.hashInsert(8, "Denmark");
+    cuckooTable.hashInsert(9, "Finland");
 
+    assert(cuckooTable.getSize() == 9);
+    // cannot be less than 16 because of rehashing due to load factor
+    assert(cuckooTable.getCapacity() >= 16);
+
+    cout << "Test with Default Hash Functions passed successfully!" << endl;
+}
 int main(){
     test1();
     test2();
+    test3();
     return 0;
 }
