@@ -23,10 +23,10 @@ void checkPosition(const CuckooHashTable<int, string>& table,
     assert(pos.second == expectedPos);
 }
 
+
 // Testing insertions with collisions, kicks and rehashing due to cycles
 void test1(){ 
-    // Χρησιμοποιούμε capacity=16 για να μην κάνει rehash λόγω load factor
-    // 5 στοιχεία σε capacity 16 => load factor = 5/(16*2) = 0.15625 < 0.5
+
     CuckooHashTable<int, string> cuckooTable(16, testHash1, testHash2);
     assert(cuckooTable.getSize() == 0);
     assert(cuckooTable.getCapacity() == 16);
@@ -52,15 +52,16 @@ void test1(){
     cuckooTable.hashInsert(48, "Burundi");
     checkPosition(cuckooTable, 48, 1, 0);
     checkPosition(cuckooTable, 32, 2, 0);
-
+    
     cuckooTable.hashInsert(16, "Palau");
+
     //16 goes to position 0 of table1 (16 % 16 = 0)
     //kicks 48 to table2 position 8 ((48/2) % 16 = 8)
     //48 kicks 17 to table1 position 1 (17 % 16 = 1)
     //17 kicks 1 to table2 position 0 ((1/2) % 16 = 0)
     //1 kicks 32 to table1 position 0 (32 % 16 = 0)
+    //32 kicks 16 to table2 position 8 ((16/2) % 16 = 8) 5th kick and since size is still 4(5th not added yet)
     // CIRCLE DETECTED -> rehash
-
     assert(cuckooTable.getSize() == 5);
     assert(cuckooTable.getCapacity() == 32);
     
@@ -68,13 +69,14 @@ void test1(){
     checkPosition(cuckooTable, 17, 1, 17);
     checkPosition(cuckooTable, 1, 1, 1);
     checkPosition(cuckooTable, 32, 1, 0);
-
+    
     //for the other 2 values we have to check the order they entered.
-    //based to the order that they were reinserted after rehash we check : 16,48
-    checkPosition(cuckooTable, 16, 2, 8); // kicked out from 48 that inserted after
-    checkPosition(cuckooTable, 48, 1, 16); // 48 % 32 = 16
-    // cuckooTable.displayTable();
-
+    //based to the order that they were reinserted after rehash we check : 48,16
+    
+    //kicked by 16 in rehasing
+    checkPosition(cuckooTable, 48, 2, 24); // 48 / 2 = 24
+    checkPosition(cuckooTable, 16, 1, 16);
+    
     cout<< "Test with Collisions, Kicks and rehashing due to cycles passed successfully!" << endl;
 }
 
@@ -131,8 +133,9 @@ void test3(){
     cout << "Test with Default Hash Functions passed successfully!" << endl;
 }
 
-// Testing with string keys, and search function
+// Testing with string keys, search function and duplicate values
 void test4(){
+    vector<int> myVec;
     CuckooHashTable<string, int> cuckooTable(4);
     cuckooTable.hashInsert("apple", 1);
     cuckooTable.hashInsert("banana", 2);
@@ -143,12 +146,31 @@ void test4(){
     assert(cuckooTable.getSize() == 5);
     assert(cuckooTable.getCapacity() >= 8);
     //search tests
-    assert(cuckooTable.hashSearch("apple") == 1);
-    assert(cuckooTable.hashSearch("banana") == 2);
-    assert(cuckooTable.hashSearch("orange") == 3);
-    assert(cuckooTable.hashSearch("grape") == 4);
-    assert(cuckooTable.hashSearch("melon") == 5);
-    assert(cuckooTable.hashSearch("kiwi") == 0); // not found
+    myVec = cuckooTable.hashSearch("apple");
+    assert(myVec[0] == 1);
+
+    myVec = cuckooTable.hashSearch("banana");
+    assert(myVec[0] == 2);
+    myVec = cuckooTable.hashSearch("orange");
+    assert(myVec[0] == 3);
+    myVec = cuckooTable.hashSearch("grape");
+    assert(myVec[0] == 4);
+    myVec = cuckooTable.hashSearch("melon");
+    assert(myVec[0] == 5);
+    myVec = cuckooTable.hashSearch("kiwi");
+    assert(myVec.size() == 0); // not found
+
+    cuckooTable.hashInsert("apple", 32);
+    cuckooTable.hashInsert("apple", 99);
+    myVec = cuckooTable.hashSearch("apple");
+    assert(myVec.size() == 3);
+    assert(myVec[0] == 1);
+    assert(myVec[1] == 32);
+    assert(myVec[2] == 99);
+
+    //size of hash table must remain same after duplicate inserts
+    // assert(cuckooTable.getSize() == 5);
+
     cout << "Test with String Keys and Search Function passed successfully!" << endl;
     
 }

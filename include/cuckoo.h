@@ -23,10 +23,9 @@ template <class keyT, class valueT>
 class hashNode{
     private:
         keyT key;
-        valueT value;
+        std::vector<valueT> values;
         bool is_occupied;
-        //bool inFirstTable;
-        
+
 
     public:
         hashNode() : is_occupied(false) {}
@@ -39,23 +38,29 @@ class hashNode{
             return key;
         }
 
-        inline const valueT& getValue() const {
-            return value;
+        inline const std::vector<valueT>& getValues() const {
+            return values;
         }
 
         // Setters
         void setOccupied(bool status) { 
             is_occupied = status; 
         }
-        void setKey(const keyT& newKey) {
-            key = newKey;
+        void setKey( keyT&& newKey){
+            key = std::move(newKey);
         }
 
-        void setValue(const valueT& newValue) {
-            value = newValue;
-       }
+        void setValuesVector( std::vector<valueT>&& newValues){
+            values = std::move(newValues);
+        }
 
+        // add a single value to the values vector
+        void addValuetoVector(const valueT& newValue){
+            values.emplace_back(newValue);
+        }
 
+        template <class K, class V>
+        friend class CuckooHashTable;
  
 };
 
@@ -65,9 +70,10 @@ using HashFunction = size_t (*)(const keyT&, size_t);
 
 template <class keyT, class valueT>
 class CuckooHashTable { 
-    private:
-        size_t capacity; 
 
+    private:
+
+        size_t capacity; 
         size_t size;
 
         std::vector<hashNode<keyT, valueT>> table1;
@@ -76,14 +82,7 @@ class CuckooHashTable {
         // two hash functions
         HashFunction<keyT> hashFunc1;
         HashFunction<keyT> hashFunc2;
-
-    public:
-        //constructor with default hash functions
-        CuckooHashTable(size_t initialCapacity, 
-                    HashFunction<keyT> h1 = defaultHash1,
-                    HashFunction<keyT> h2 = defaultHash2);
-
-    
+        
         // Default hash functions defined as static methods
         //As static methods are written one time for all instances of the class (less memory)
         static size_t defaultHash1(const keyT& key, size_t cap) {
@@ -111,7 +110,7 @@ class CuckooHashTable {
             hash = (hash * golden_ratio) >> (64 - shift);
             return hash & (cap - 1); // Faster than modulo if capacity is power of 2
         }
-        
+
         static size_t defaultHash2(const keyT& key, size_t cap) {
             // Hash2: SplitMix64 mix of a different seed to decorrelate from Hash1
             uint64_t x = static_cast<uint64_t>(std::hash<keyT>{}(key)) ^ 0x9E3779B97F4A7C15ULL;
@@ -122,15 +121,13 @@ class CuckooHashTable {
             return static_cast<size_t>(x) & (cap - 1);
         }
 
+    public:
 
-        // Hash function wrappers - encapsulation logic
-        size_t hash1(const keyT& key) const {
-            return hashFunc1(key, capacity);
-        }
-        
-        size_t hash2(const keyT& key) const {
-            return hashFunc2(key, capacity);
-        }
+        //constructor with default hash functions
+        CuckooHashTable(size_t initialCapacity, 
+                    HashFunction<keyT> h1 = defaultHash1,
+                    HashFunction<keyT> h2 = defaultHash2);
+
 
         float getLoadFactor() const {
             return capacity ? static_cast<float>(size) / (static_cast<float>(capacity) * 2) : 0.0f;
@@ -144,13 +141,9 @@ class CuckooHashTable {
             return capacity;
         }
 
-        bool hashInsert(const keyT& inputKey, const valueT& inputValue);
+        bool hashInsert(const keyT& key, const valueT& value);
 
-        valueT hashSearch(const keyT& key) const;
-
-        // Returns mutable pointer to value for key. Returns nullptr if key not found.
-        // Is needed in execute.cpp (acts like itr->second for unordered map)
-        valueT* getMutable(const keyT& key);
+        const std::vector<valueT> hashSearch(const keyT& key) const;
 
         void rehash();      
 
@@ -158,12 +151,12 @@ class CuckooHashTable {
     //------------------------------TESTING ASSOSCIATED METHODS-------------------------------------//
         // returns in which table and position the key is found. useful for testing!!
         std::pair<int, size_t> findPosition(const keyT& key) const {
-            size_t pos1 = hash1(key);
+            size_t pos1 = hashFunc1(key, capacity);
             if (table1[pos1].isOccupied() && table1[pos1].getKey() == key) {
                 return {1, pos1};
             }
-            
-            size_t pos2 = hash2(key);
+
+            size_t pos2 = hashFunc2(key, capacity);
             if (table2[pos2].isOccupied() && table2[pos2].getKey() == key) {
                 return {2, pos2};
             }
@@ -172,6 +165,8 @@ class CuckooHashTable {
         }
 
         void displayTable(); // for debugging
+
+
 };
 
 
@@ -197,52 +192,55 @@ CuckooHashTable<keyT, valueT>::CuckooHashTable(size_t initialCapacity,
     
 
 template <class keyT, class valueT>
-bool CuckooHashTable<keyT, valueT>::hashInsert(const keyT& inputKey, const valueT& inputValue) {
+bool CuckooHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT& value) {
 
     // check load factor and rehash if necessary. Doing it in the beginning to avoid unnecessary computations
     if(getLoadFactor() >= MAX_LOAD_FACTOR){
         rehash();
     }
 
+    // First, check if the key already exists in either table
+    size_t pos1 = hashFunc1(key, capacity);
+    if (table1[pos1].isOccupied() && table1[pos1].getKey() == key) {
+        table1[pos1].addValuetoVector(value);
+        return true;
+    }
+
+    size_t pos2 = hashFunc2(key, capacity);
+    if (table2[pos2].isOccupied() && table2[pos2].getKey() == key) {
+        table2[pos2].addValuetoVector(value);
+        return true;
+    }
+
+    // Key doesn't exist, so we need to insert it
     // if size kicks happen it means that we are in a cycle and need to rehash
     size_t maxKicks = size + 1;
     size_t currentKicks = 0;
     bool tableToSearch = true; // true for table1, false for table2
 
-    keyT key = inputKey;
-    valueT value = inputValue;
+    keyT inputKey = key;
+    std::vector<valueT> inputValues{value};
+
 
     while (1) {
 
         // table1 case
         if (tableToSearch) {
-            size_t pos1 = hash1(key);
-            auto& node1 = table1[pos1];
+            size_t pos1 = hashFunc1(inputKey, capacity);
 
             // just insert the key,value if position is empty
-            if (!node1.isOccupied()) {
-                node1.setKey(key);
-                node1.setValue(value);
-                node1.setOccupied(true);
+            if (!table1[pos1].isOccupied()) {
+                table1[pos1].setKey(std::move(inputKey));
+                table1[pos1].setValuesVector(std::move(inputValues));
+                table1[pos1].setOccupied(true);
                 size++;
                 return true;
             }
-            // if same key exists, just update the value
-            else if (node1.getKey() == key) {
-                node1.setValue(value);
-                return true;
-            }
-           // if occupied by different key we insert the new one but first keeping the old one to reinsert to the other table
+            // if occupied by different key we insert the new one but first keeping the old one to reinsert to the other table
             else {
                 // Kick out existing element
-                keyT oldKey = node1.getKey();
-                valueT oldValue = node1.getValue();
-
-                node1.setKey(key);
-                node1.setValue(value);
-
-                key = oldKey;
-                value = oldValue;
+                std::swap(inputKey, table1[pos1].key);
+                std::swap(inputValues, table1[pos1].values);
                 // switch to table2 (we will try to insert there the kicked node)
                 tableToSearch = false;
                 currentKicks++;
@@ -250,34 +248,21 @@ bool CuckooHashTable<keyT, valueT>::hashInsert(const keyT& inputKey, const value
         } 
         else{
             // table2 case
-            size_t pos2 = hash2(key);
-            auto& node2 = table2[pos2];
+            size_t pos2 = hashFunc2(inputKey, capacity);
 
-
-            if (!node2.isOccupied()) {
-                node2.setKey(key);
-                node2.setValue(value);
-                node2.setOccupied(true);
+            if (!table2[pos2].isOccupied()) {
+                table2[pos2].setKey(std::move(inputKey));
+                table2[pos2].setValuesVector(std::move(inputValues));
+                table2[pos2].setOccupied(true);
                 size++;
-                return true;
-            }
-            // if same key exists, just update the value
-            else if (node2.getKey() == key) {
-                node2.setValue(value);
+
                 return true;
             }
             // if occupied by different key we insert the new one but first keeping the old one to reinsert to the other table
             else {
                 // Kick out existing element
-                keyT oldKey = node2.getKey();
-                valueT oldValue = node2.getValue();
-
-                node2.setKey(key);
-                node2.setValue(value);
-
-                key = oldKey;
-                value = oldValue;
-
+                std::swap(inputKey, table2[pos2].key);
+                std::swap(inputValues, table2[pos2].values);
                 // switch to table1
                 tableToSearch = true;
                 currentKicks++;
@@ -311,13 +296,17 @@ void CuckooHashTable<keyT, valueT>::rehash() {
     
     for (const auto& node : old_table1) {
         if (node.isOccupied()) {
-            hashInsert(node.getKey(), node.getValue());
+            for (const auto& val : node.getValues()) {
+                hashInsert(node.getKey(), val);
+            }
         }
     }
     
     for (const auto& node : old_table2) {
         if (node.isOccupied()) {
-            hashInsert(node.getKey(), node.getValue());
+            for (const auto& val : node.getValues()) {
+                hashInsert(node.getKey(), val);
+            }
         }
     }
 }
@@ -325,19 +314,24 @@ void CuckooHashTable<keyT, valueT>::rehash() {
 
 //TODO : does it have to be const the return value?????
 template <class keyT, class valueT>
-valueT CuckooHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
-    size_t pos1 = hash1(key);
+const std::vector<valueT> CuckooHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
+
+    size_t pos1 = hashFunc1(key, capacity);
     const auto& node1 = table1[pos1];
     if(node1.isOccupied() && node1.getKey() == key) {
-        return node1.getValue();
+        return node1.getValues();
     }
-    size_t pos2 = hash2(key);
+
+    size_t pos2 = hashFunc2(key, capacity);
     const auto& node2 = table2[pos2];
     if(node2.isOccupied() && node2.getKey() == key) {
-        return node2.getValue();
+        return node2.getValues();
     }
+
     return {};
 }
+
+
 
 template <class keyT, class valueT>
 void CuckooHashTable<keyT, valueT>::displayTable() {
@@ -348,37 +342,25 @@ void CuckooHashTable<keyT, valueT>::displayTable() {
         const auto& node = table1[i];
         std::cout <<  "[" << i << "]";
         if (node.isOccupied()) {
-            std::cout <<"   Key = " << node.getKey() << ", Value = " << node.getValue();
+            std::cout <<"   Key = " << node.getKey() << ", Values = ";
+            for (const auto& val : node.getValues()) {
+                std::cout << val << " ";
+            }
         }
         std::cout << std::endl;
     }
+
     std::cout << "\n\nTable 2:" << std::endl;
     for (size_t i = 0; i < capacity; ++i) {
         const auto& node = table2[i];
         std::cout <<  "[" << i << "]";
         if (node.isOccupied()) {
-            std::cout << "   Key = " << node.getKey() << ", Value = " << node.getValue();
+            std::cout << "   Key = " << node.getKey() << ", Values = ";
+            for (const auto& val : node.getValues()) {
+                std::cout << val << " ";
+            }
         }
         std::cout << std::endl;
     }
     std::cout << std::endl;
-}
-
-
-template <class keyT, class valueT>
-valueT* CuckooHashTable<keyT, valueT>::getMutable(const keyT& key) {
-    // Check first table
-    size_t pos1 = hash1(key);
-    if (table1[pos1].isOccupied() && table1[pos1].getKey() == key) {
-        return const_cast<valueT*>(&table1[pos1].getValue());
-    }
-    
-    // Check second table
-    size_t pos2 = hash2(key);
-    if (table2[pos2].isOccupied() && table2[pos2].getKey() == key) {
-        return const_cast<valueT*>(&table2[pos2].getValue());
-    }
-    
-    // Key not found - return nullptr
-    return nullptr;
 }

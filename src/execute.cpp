@@ -2,6 +2,8 @@
 #include <plan.h>
 #include <table.h>
 #include "cuckoo.h"
+#include <algorithm>
+
 namespace Contest {
 
 // similar to typedef: write ExecuteResult instead of std::vector<std::vector<Data>>
@@ -25,14 +27,16 @@ struct JoinAlgorithm {
     auto run() {
         namespace views = ranges::views;
 
-        
+        // STEP 1: the hash table for joining: type of join key, vector of row indexes that contain the key: 
+        // one key might correspond to multiple rows
+ 
         // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
         // CALCULATE THE HASH VALUE OF EACH KEY AND STORE IT IN THE HASH TABLE
         // if we build on the left table
         if (build_left) {
-            // the hash table for joining: type of join key, vector of row indexes that contain the key: 
-            // one key might correspond to multiple rows
-            CuckooHashTable<T, std::vector<size_t>> hash_table(2*(left.size()));
+            CuckooHashTable<T, size_t> hash_table(left.size() * 2); // set initial capacity
+
+
             // iterates over all rows of left table with row index idx
             // record: the actual row
             for (auto&& [idx, record]: left | views::enumerate) {
@@ -48,16 +52,10 @@ struct JoinAlgorithm {
 
                          // if the key's type matches the join type, insert it into hash table
                         if constexpr (std::is_same_v<Tk, T>) {
+                            // insert the row index; Cuckoo stores a vector internally
+                            // no need to check for duplicates, Cuckoo acts like multi map
+                            hash_table.hashInsert(key, idx);
 
-                            // try to find the key in the hash table using getMutable (pointer)
-                            auto* vec_ptr = hash_table.getMutable(key);
-                            if (vec_ptr != nullptr) {
-                                // key found, append idx
-                                vec_ptr->push_back(idx);
-                            } else {
-                                // key not found, insert new entry
-                                hash_table.hashInsert(key, std::vector<size_t>(1, idx));
-                            }
                         } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
                             throw std::runtime_error("wrong type of field");
                         }
@@ -81,11 +79,11 @@ struct JoinAlgorithm {
                             // add it to the final results
 
                             // search for the key in the hash table
-                            auto* matching_indices = hash_table.getMutable(key);
-                            if (matching_indices != nullptr) {
+                            if (auto itr = hash_table.hashSearch(key); !itr.empty()) {
 
-                                // for each matching left row index
-                                for (auto left_idx: *matching_indices) {
+                                // for each matching left row index from
+                                // search returns the vector with values instantly and not std::pair<const Key, Value> like in unordered_map 
+                                   for (auto left_idx: itr) {
                                     auto&             left_record = left[left_idx]; //get the whole left row
                                     std::vector<Data> new_record;
                                     new_record.reserve(output_attrs.size());
@@ -127,19 +125,16 @@ struct JoinAlgorithm {
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
         } else {
-            CuckooHashTable<T, std::vector<size_t>> hash_table(2*(right.size()));
+
+            CuckooHashTable<T, size_t> hash_table(right.size() * 2); // set initial capacity
 
             for (auto&& [idx, record]: right | views::enumerate) {
                 std::visit(
                     [&hash_table, idx = idx](const auto& key) {
                         using Tk = std::decay_t<decltype(key)>;
                         if constexpr (std::is_same_v<Tk, T>) {
-                            auto* vec_ptr = hash_table.getMutable(key);
-                            if (vec_ptr != nullptr) {
-                                vec_ptr->push_back(idx);
-                            } else {
-                                hash_table.hashInsert(key, std::vector<size_t>(1, idx));
-                            }
+                            hash_table.hashInsert(key, idx);
+                            
                         } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
                             throw std::runtime_error("wrong type of field");
                         }
@@ -151,9 +146,8 @@ struct JoinAlgorithm {
                     [&](const auto& key) {
                         using Tk = std::decay_t<decltype(key)>;
                         if constexpr (std::is_same_v<Tk, T>) {
-                            auto* matching_indices = hash_table.getMutable(key);
-                            if (matching_indices != nullptr) {
-                                for (auto right_idx: *matching_indices) {
+                            if (auto itr = hash_table.hashSearch(key); !itr.empty()) {
+                                for (auto right_idx: itr) {
                                     auto&             right_record = right[right_idx];
                                     std::vector<Data> new_record;
                                     new_record.reserve(output_attrs.size());
