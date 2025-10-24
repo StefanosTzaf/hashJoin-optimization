@@ -6,6 +6,23 @@
 
 #define MAX_LOAD_FACTOR 0.75
 
+// Helper function: returns the smallest power of 2 >= n
+// is used in Capacity of hash tables
+inline size_t nextPowerOf2(size_t n) {
+    if (n == 0) return 1;
+    // Check if already a power of 2
+    if ((n & (n - 1)) == 0) {
+        return n;
+    }
+    // Find the next power of 2
+    size_t power = 1;
+    while (power < n) {
+        power <<= 1;
+    }
+    return power;
+}
+
+
 template <class keyT, class valueT>
 class hashNode{
 
@@ -80,6 +97,13 @@ public:
 
 };
 
+
+// generic hash function type, so as to be able to give ours when being constructed
+template <class keyT>
+using HashFunction = size_t (*)(const keyT&, size_t);
+
+
+
 template <class keyT, class valueT>
 class RobinHoodHashTable {
 
@@ -88,51 +112,39 @@ private:
     size_t size; // current number of elements in the table
     std::vector<hashNode<keyT, valueT>> table;
 
-    // FNV-1a constants
-    static constexpr size_t FNV_prime = 1099511628211ULL;
-    static constexpr size_t FNV_offset = 14695981039346656037ULL;
-    static constexpr size_t golden_ratio = 11400714819323198485ULL;
+    HashFunction<keyT> hashFunc;
 
-    // Base FNV-1a implementation
-    inline size_t fnv1a_hash(const void* data, size_t size) const {
-        const uint8_t* bytes = static_cast<const uint8_t*>(data);
-        size_t hash = FNV_offset;
-        for(size_t i = 0; i < size; ++i) {
-            hash ^= bytes[i];
-            hash *= FNV_prime;
+    // FMV_1a + Fibonacci hashing
+    static size_t defaultHash(const keyT& key, size_t cap){
+        // Use std::hash first, so as to work with all types
+        size_t hash = std::hash<keyT>{}(key);
+        
+        // FNV-1a hash mixing
+        constexpr size_t FNV_prime = 1099511628211ULL;
+        constexpr size_t FNV_offset = 14695981039346656037ULL;
+        
+        hash = (hash ^ FNV_offset) * FNV_prime;
+        hash = (hash ^ (hash >> 32)) * FNV_prime;
+        
+        // Fibonacci hashing for better distribution
+        constexpr size_t golden_ratio = 11400714819323198485ULL;
+        
+        // Calculate leading zeros
+        size_t shift = 0;
+        size_t temp = cap;
+        while (temp > 1) {
+            temp >>= 1;
+            shift++;
         }
-        return hash;
-    }
-
-    // Type-specific hash functions
-    inline size_t hash_key(const std::string& key) const {
-        return fnv1a_hash(key.data(), key.size());
-    }
-
-    inline size_t hash_key(int32_t key) const {
-        return fnv1a_hash(&key, sizeof(key));
-    }
-
-    inline size_t hash_key(int64_t key) const {
-        return fnv1a_hash(&key, sizeof(key));
-    }
-
-    inline size_t hash_key(double key) const {
-        if (key == 0.0) key = 0.0;  // Convert -0.0 to +0.0
-        if (key != key) key = 0.0;  // Convert NaN to 0.0
-        return fnv1a_hash(&key, sizeof(key));
-    }
-
-    // Fallback for other types using std::hash
-    template<typename T>
-    inline size_t hash_key(const T& key) const {
-        return std::hash<T>{}(key);
+        
+        hash = (hash * golden_ratio) >> (64 - shift);
+        return hash & (cap - 1); // Faster than modulo if capacity is power of 2
     }
 
 public:
     
-    //constructor
-    RobinHoodHashTable(size_t initialCapacity = 16);
+    //constructor, if no hash function is provided, use default
+    RobinHoodHashTable(size_t initialCapacity, HashFunction<keyT> h = defaultHash);
     
     bool hashInsert(const keyT& key, const valueT& value);
 
@@ -143,17 +155,78 @@ public:
     // returns vector of values for the given key
     const std::vector<valueT> hashSearch(const keyT& key) const;
 
-    //the second const declares that the function does not modify any member variables (read-only function)
-    size_t hashFunction(const keyT& key) const;
-
     size_t getSize() const{
         return size;
     }
-
+    size_t getCapacity() const{
+        return capacity;
+    }
     float getLoadFactor() const {
         return capacity ? static_cast<float>(size) / static_cast<float>(capacity) : 0.0f;
     }
 
+    //------------------------------Test associated functions------------------------------------
+    size_t findPosition(const keyT& key) const {
+        size_t pos = hashFunc(key, capacity);
+        size_t currSpl = 0;
+        size_t i = pos;
+        while (true) {
+            const auto& node = table[i];
+            
+            // If position is empty, key definitely not found
+            if (!node.isOccupied()) {
+                return -1;
+            }
+
+            // if key found, return its position
+            if(node.getKey() == key) {
+                return i;
+            }
+
+            // if we reach a node with psl less than currSpl, key not found
+            if(node.getPsl() < currSpl) {
+                return -1;
+            }
+
+            currSpl++;
+            i = (i + 1) % capacity;
+            if (i == pos){
+                break;
+            }
+        }
+        return -1;
+    }
+
+    size_t getPslOfKey(const keyT& key) const {
+        size_t pos = hashFunc(key, capacity);
+        size_t currSpl = 0;
+        size_t i = pos;
+        while (true) {
+            const auto& node = table[i];
+            
+            // If position is empty, key definitely not found
+            if (!node.isOccupied()) {
+                return -1;
+            }
+
+            // if key found, return its psl
+            if(node.getKey() == key) {
+                return node.getPsl();
+            }
+
+            // if we reach a node with psl less than currSpl, key not found
+            if(node.getPsl() < currSpl) {
+                return -1;
+            }
+
+            currSpl++;
+            i = (i + 1) % capacity;
+            if (i == pos){
+                break;
+            }
+        }
+        return -1;
+    }
 };
 
 
@@ -164,41 +237,30 @@ public:
 
 template <typename keyT, typename valueT>
 // dynamically allocate table(vector)
-RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity)
-    : size(0) {
+RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity, HashFunction<keyT> h)
+    : size(0), hashFunc(h) {
     // Round up to next power of 2
     capacity = 16; // minimum size
-    while (capacity < initialCapacity) {
-        capacity *= 2;
+    if(initialCapacity == 0) {
+        capacity = 16;
     }
-    table.resize(capacity);
-}
-
-template <typename keyT, typename valueT>
-size_t RobinHoodHashTable<keyT, valueT>::hashFunction(const keyT& key) const {
-    // Get initial hash using type-specific function
-    size_t hash = hash_key(key);
-    
-    // Calculate leading zeros manually instead of using bit_width
-    size_t shift = 0;
-    size_t temp = capacity;
-    while (temp > 1) {
-        temp >>= 1;
-        shift++;
+    else{
+        capacity = nextPowerOf2(initialCapacity);
     }
-    
-    // Apply Fibonacci hashing
-    hash = (hash * golden_ratio) >> (64 - shift);
-    return hash & (capacity - 1); // Faster than modulo if capacity is power of 2
+    size = 0;
+    table = std::vector<hashNode<keyT, valueT>>(capacity);
 }
-
-
 
 
 template <typename keyT, typename valueT>
 bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT& value) {
+   
+    // check load factor and rehash if needed before insertion
+    if(getLoadFactor() >= MAX_LOAD_FACTOR){
+        rehash();
+    }
 
-    size_t pos = hashFunction(key);
+    size_t pos = hashFunc(key, capacity);
 
     // these three variables are the ones we are trying
     // to insert into the hash table each time
@@ -222,10 +284,6 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
 
             size++;
 
-            // check load factor and rehash if needed
-            if(getLoadFactor() >= MAX_LOAD_FACTOR){
-                rehash();
-            }
 
             return true; // setValue
         }
@@ -235,7 +293,6 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
             table[i].addValuetoVector(value);
             return true; // value added to existing key
 
-            // no size increment needed since it's the same key
         }
 
         // if position is occupied from a different key
@@ -301,7 +358,7 @@ void RobinHoodHashTable<keyT, valueT>::rehash(){
 template <typename keyT, typename valueT>
 const std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const keyT& key) const {
 
-    size_t pos = hashFunction(key);
+    size_t pos = hashFunc(key, capacity);
     size_t currSpl = 0;
     size_t i = pos;
     // circular probing
