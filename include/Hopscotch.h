@@ -357,7 +357,8 @@ bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, co
 template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos, 
     const keyT& key, const valueT& value){
-        
+    
+    // calculate distance from pos to freeSlot with wrap around
     size_t dist;
     if (freeSlot >= pos) {
         dist = freeSlot - pos;
@@ -365,7 +366,7 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
         dist = capacity - pos + freeSlot; // wrap around
     }
 
-    // the free slot is outside hop range, now we should move elements
+    // while the free slot is outside hop range, swap elements
     while(dist % capacity >= hopRange){
 
         bool moved = false;
@@ -393,16 +394,14 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
             }
 
             auto& bitmap = table[i].getHopInfo();
-            size_t bitIndex = 0;
 
             // we should check only bits that correspond to slots before freeSlot
             // bit[hopRange - 1] corresponds to freeSlot
-            while(bitIndex < hopRange - 1){
-         
+            for(size_t bitIndex = 0; bitIndex < hopRange; bitIndex++){
+
                 if(bitmap[bitIndex] == true){
 
                     slotToMove = (i + bitIndex) % capacity; // actual position of the element to move
-
                     
                     // swap the empty slot with the slotToMove
                     table[freeSlot].setKey(std::move(table[slotToMove].key));
@@ -435,10 +434,7 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
                     }
 
                     break;
-                }
-
-
-                bitIndex++; // check next bit
+                }       
             }
 
             if (moved == true){
