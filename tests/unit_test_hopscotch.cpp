@@ -278,6 +278,70 @@ void test_swapping_with_rehashing(){
         
 }
 
+void test_wrap_around_insertion(){
+    std:: cout << "\nTesting simple wrap around insertion within hop range...\n";
+
+    // table with capacity 10 and hop range 3
+    Hopscotch<int, string> table(10, 3, testHash1);
+
+    // Insertion
+    assert(table.hashInsert(0, "zero") == true); // simple insertion at original position
+    assert(table.hashInsert(2, "two") == true); // simple insertion at original position
+    assert(table.hashInsert(12, "twelve") == true); // collides with key 2, should be placed in pos 3
+    assert(table.hashInsert(4, "four") == true); // simple insertion at original position
+    assert(table.hashInsert(5, "five") == true); // simple insertion at original position
+    assert(table.hashInsert(6, "six") == true); // simple insertion at original position
+    assert(table.hashInsert(7, "seven") == true); // simple insertion at original position
+    assert(table.hashInsert(8 , "eight") == true); // simple insertion at original position
+    assert(table.hashInsert(9 , "nine") == true); // simple insertion at original position
+
+    assert(table.hashInsert(19 , "nineteen") == true); // original pos:9, should cause wrap around swapping
+
+    // first free slot is pos 1, which is inside hop range of pos 9 due to wrap around
+    // so 19 should be placed there
+    assert(table.getKeyOfPos(1) == 19);
+    // bitmap of pos 9 should be [1 0 1] since keys 9 and 19 hashed there
+    assert(table.getHopInfoBitmap(9) == vector<bool>({true, false, true}));
+
+    // table.printTable();
+}
+
+void test_wrap_around_insertion_with_swapping(){
+    std:: cout << "\nTesting wrap around insertion with swapping...\n";
+
+    // table with capacity 10 and hop range 3
+    Hopscotch<int, string> table(10, 3, testHash1);
+
+    // Insertion
+    assert(table.hashInsert(0, "zero") == true); // simple insertion at original position
+    assert(table.hashInsert(1, "one") == true); // simple insertion at original position
+    assert(table.hashInsert(2, "two") == true); // simple insertion at original position
+    assert(table.hashInsert(3, "three") == true); // simple insertion at original position
+
+    assert(table.hashInsert(5, "five") == true); // simple insertion at original position
+    assert(table.hashInsert(6, "six") == true); // simple insertion at original position
+    assert(table.hashInsert(7, "seven") == true); // simple insertion at original position
+    assert(table.hashInsert(9, "nine") == true); // simple insertion at original position
+    
+    assert(table.hashInsert(19, "nineteen") == true); // original pos:9, should cause wrap around swapping
+    
+    // first free slot is pos 4, which is outside hop range of pos 9
+    // pos 4 should be swapped with pos 2 which will have a bitmap of [0 0 1]
+    assert(table.getHopInfoBitmap(2) == vector<bool>({false, false, true}));
+    
+    // now pos 2 is free and should be swapped with pos 0 which will have a bitmap of [0 0 1]
+    assert(table.getHopInfoBitmap(0) == vector<bool>({false, false, true}));
+    
+    // now pos 0 is free and is within hop range of pos 9 due to wrap around
+    // so 19 should be placed there
+    assert(table.getKeyOfPos(0) == 19);
+    // bitmap of pos 9 should be [1 1 0] since keys 9 and 19 hashed there
+    assert(table.getHopInfoBitmap(9) == vector<bool>({true, true, false}));
+    
+    // table.printTable();
+    
+}
+
 int main(){
     test_simple_insertion();
     test_rehashing();
@@ -285,6 +349,8 @@ int main(){
     test_swapping_elements();
     test_swapping_elements_2();
     test_swapping_with_rehashing();
+    test_wrap_around_insertion();
+    test_wrap_around_insertion_with_swapping();
 
     cout << "\nAll unit tests passed!\n";
     return 0;
