@@ -107,40 +107,54 @@ class Hopscotch{
     bool hashInsert(const keyT& key, const valueT& value);
     size_t hashFunction(const keyT& key) const;
     
-    // returns vector of values for the given key
-    const std::vector<valueT> hashSearch(const keyT& key) const;
     
     void rehash();
-    void printTable() const; // for debugging
-
+    
     inline size_t getSize() const{
         return size;
     }
 
     // extra functions
-
+    
     // checks if the original hashed position is free
     // if so, inserts the key-value pair there and sets up hop info bitmap and returns true
     bool insertInOriginalPos(const size_t pos, const keyT& key, const valueT& value);
-
+    
     // returns true if all slots in bitmap hop info are occupied
     bool isHopInfoFull(const size_t pos) const;
-
+    
     // finds the next free slot starting from startPos
     // and returns its index or capacity if none found
     size_t findFreeSlot(const size_t startPos) const;
-
+    
     // checks if free slot is within hop range of hashed position
     // if so, inserts the key-value pair there and updates hop info bitmap and returns true
     bool insertWithinHopRange(const size_t freeSlot, const size_t hashedPos, const keyT& key, const valueT& value);
-
+    
     // it checks if the key already exists, if so it appends the value to the existing key's values vector
     bool insertDuplicateKey(size_t pos, const keyT& key, const valueT& value);
-
+    
+    
+    // helps functions for unit tests
+    
+    void printTable() const;
+    size_t getKeyOfPos(const size_t pos) const{
+        return table[pos].getKey();
+    }
+    
     void printHopInfoBitmap(const size_t pos) const;
 
-
-
+    std::vector<bool> getHopInfoBitmap(const size_t pos) const{
+        return table[pos].getHopInfo();
+    }
+    
+    std::vector<valueT> getValuesVectorOfPos(const size_t pos) const{
+        return table[pos].getValue();
+    }
+    
+    // returns vector of values for the given key
+    const std::vector<valueT> hashSearch(const keyT& key) const;
+    
 };
 
 
@@ -245,7 +259,6 @@ bool Hopscotch<keyT, valueT>::insertWithinHopRange(const size_t freeSlot, const 
         table[freeSlot].setKey(key);
         table[freeSlot].addValuetoVector(value);
         table[freeSlot].setOccupied(true);
-        table[freeSlot].resetHopInfo(hopRange);
     
         size++;
 
@@ -296,7 +309,7 @@ bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, co
 template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
 
-    std::cout<< key << " INSIDE----";
+    // std::cout<< key << " INSIDE----";
    
     size_t pos = hashFunction(key);
     
@@ -304,19 +317,18 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
     if(insertDuplicateKey(pos, key, value) == true){
         return true;
     }
-    std::cout<< key << " no duplicate----";
+
     // if the original hashed position is free, insert there
     if (insertInOriginalPos(pos, key, value) == true) {
         return true;
     }
-    std::cout<< "not in original pos----";
 
     // check if hop info is full, if so table is full and needs rehashing
    if(isHopInfoFull(pos) == true){
         rehash();
         return hashInsert(key, value);
     }
-    std::cout<< "hop info not full----";
+
     // search for a free slot
     size_t freeSlot = findFreeSlot(pos);
 
@@ -352,6 +364,7 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
                 }
 
                 if(bitmap[bitIndex] == true){
+
                     slotToMove = i + bitIndex;
 
                     // swap the empty slot with the slotToMove
@@ -370,6 +383,12 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
                     break;
                 }
 
+                // if we have reached checking pos just before freeSlot, hop range is full
+                if (i == freeSlot - 1){
+                    rehash();
+                    return hashInsert(key, value);
+                }
+
                 bitIndex++; // check next bit
             }
 
@@ -379,11 +398,13 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
         }
     }
 
+    
     // now the free slot is within hop range, insert the new key-value pair
     if(insertWithinHopRange(freeSlot, pos, key, value) == true){
+
         return true;
     }
-
+    
 
     return false;
 
