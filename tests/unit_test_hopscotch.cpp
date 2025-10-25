@@ -6,12 +6,16 @@
 
 using namespace std;
 
+size_t testHash1(const int& key, size_t cap) {
+    return key % cap;
+}
+
 void test_simple_insertion(){
 
     std:: cout << "\nTesting simple insertions, collisions and duplicate key handling ...\n";
 
     // table with capacity 10 and hop range 3
-    Hopscotch<int, string> table(10, 3);
+    Hopscotch<int, string> table(10, 3, testHash1);
     
     // Insertion
     assert(table.hashInsert(0, "zero") == true);
@@ -72,7 +76,7 @@ void test_rehashing(){
     std:: cout << "\nTesting rehashing when no free slots are available in hop range:\n";
 
     // table with capacity 10 and hop range 3
-    Hopscotch<int, string> table(10, 3);
+    Hopscotch<int, string> table(10, 3, testHash1);
     
     // Inserting same keys as previous test to fill the table
     assert(table.hashInsert(0, "zero") == true);
@@ -122,7 +126,7 @@ void test_no_free_slots(){
     std:: cout << "\nTesting hashing when no free slots are available in table ...\n";
     
     // table with capacity 10 and hop range 3
-    Hopscotch<int, string> table(10, 3);
+    Hopscotch<int, string> table(10, 3, testHash1);
     
     // Inserting same keys as previous test to fill the table
     assert(table.hashInsert(0, "zero") == true);
@@ -154,7 +158,7 @@ void test_swapping_elements(){
     std:: cout << "\nTesting swapping elements to bring free slot within hop range ...\n";
     
     // table with capacity 10 and hop range 3
-    Hopscotch<int, string> table(10, 3);
+    Hopscotch<int, string> table(10, 3, testHash1);
     
     // Insertion
     assert(table.hashInsert(0, "zero") == true);
@@ -218,7 +222,7 @@ void test_swapping_elements_2(){
     std:: cout << "\nTesting swapping elements with free slot being in the middle ...\n";
     
     // table with capacity 10 and hop range 4
-    Hopscotch<int, string> table(10, 3);
+    Hopscotch<int, string> table(10, 3, testHash1);
     
     // Insertion
     assert(table.hashInsert(0, "zero") == true);
@@ -244,7 +248,7 @@ void test_swapping_elements_2(){
 
     // pos 2 is within hop range of pos 0, so 10 should be placed there
     assert(table.getKeyOfPos(2) == 10);
-
+    
     // table.printTable();
 }
 
@@ -252,7 +256,7 @@ void test_swapping_with_rehashing(){
       std:: cout << "\nTesting rehashing when no slot can be swapped ...\n";
 
     // table with capacity 10 and hop range 3
-    Hopscotch<int, string> table(10, 3);
+    Hopscotch<int, string> table(10, 3, testHash1);
     
     // Insertion
     assert(table.hashInsert(0, "zero") == true);

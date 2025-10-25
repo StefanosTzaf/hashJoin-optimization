@@ -1,6 +1,22 @@
 #include <iostream>
 #include <vector>
 
+// Helper function: returns the smallest power of 2 >= n
+// is used in Capacity of hash tables
+inline size_t nextPowerOf2(size_t n) {
+    if (n == 0) return 1;
+    // Check if already a power of 2
+    if ((n & (n - 1)) == 0) {
+        return n;
+    }
+    // Find the next power of 2
+    size_t power = 1;
+    while (power < n) {
+        power <<= 1;
+    }
+    return power;
+}
+
 
 template <class keyT, class valueT>
 class hashNode{
@@ -90,6 +106,9 @@ class hashNode{
 
 };
 
+template <class keyT>
+using HashFunction = size_t (*)(const keyT&, size_t);
+
 template <class keyT, class valueT>
 class Hopscotch{
 
@@ -97,15 +116,25 @@ class Hopscotch{
     size_t size; // current number of elements in the table
     std::vector<hashNode<keyT, valueT>> table;
     size_t hopRange; // range for hopscotch
+    HashFunction<keyT> hashFunc;
 
     public:
     
-    Hopscotch(size_t capacity, size_t hopR): capacity(capacity), size(0), hopRange(hopR){
+    static size_t defaultHash(const keyT& key, size_t capacity);
+
+    Hopscotch(size_t capacity, size_t hopR, HashFunction<keyT> h = hashFunction): capacity(capacity), size(0), hopRange(hopR), hashFunc(h){
+        if (capacity == 0){
+            capacity = 16;
+        }
+        else{
+            // capacity = nextPowerOf2(capacity);
+        }
         table.resize(capacity, hashNode<keyT, valueT>(hopRange));
+        
     }
 
     bool hashInsert(const keyT& key, const valueT& value);
-    size_t hashFunction(const keyT& key) const;
+    static size_t hashFunction(const keyT& key, size_t capacity);
     
     
     void rehash();
@@ -163,7 +192,7 @@ class Hopscotch{
 //##### IMPLEMENTATION #####//
 
 template <typename keyT, typename valueT>
-size_t Hopscotch<keyT, valueT>::hashFunction(const keyT& key) const{
+size_t Hopscotch<keyT, valueT>::hashFunction(const keyT& key, size_t capacity){
     return capacity ? (std::hash<keyT>{}(key) % capacity) : 0;
    
 }
@@ -310,9 +339,9 @@ template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
 
     // std::cout<< key << " INSIDE----";
-   
-    size_t pos = hashFunction(key);
-    
+
+    size_t pos = hashFunc(key, capacity);
+
     // check if key already exists, if so append value to existing vector
     if(insertDuplicateKey(pos, key, value) == true){
         return true;
@@ -368,7 +397,7 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
                     slotToMove = i + bitIndex;
 
                     // swap the empty slot with the slotToMove
-                    table[freeSlot].setKey(std::move(table[slotToMove].getKey()));
+                    table[freeSlot].setKey(std::move(table[slotToMove].key));
                     table[freeSlot].setValuesVector(std::move(table[slotToMove].values));
                     table[freeSlot].setOccupied(true);
                     
@@ -395,13 +424,18 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
             if (moved == true){
                 break;
             }
+
         }
+        // if no element could be moved, rehash
+        if(moved == false){
+            rehash();
+            return hashInsert(key, value);
+        }
+
     }
 
-    
     // now the free slot is within hop range, insert the new key-value pair
     if(insertWithinHopRange(freeSlot, pos, key, value) == true){
-
         return true;
     }
     
@@ -413,8 +447,8 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
 
 template <typename keyT, typename valueT>
 const std::vector<valueT> Hopscotch<keyT, valueT>::hashSearch(const keyT& key) const{
-    
-    size_t pos = hashFunction(key);
+
+    size_t pos = hashFunc(key, capacity);
 
     // check if the key at hashed position matches
     if(table[pos].isOccupied() && table[pos].getKey() == key){
@@ -486,3 +520,30 @@ void Hopscotch<keyT, valueT>::printTable() const{
         
         }
 }
+
+template <class keyT, class valueT>
+size_t Hopscotch<keyT, valueT>::defaultHash(const keyT& key, size_t cap){
+        // Use std::hash first, so as to work with all types
+        size_t hash = std::hash<keyT>{}(key);
+        
+        // FNV-1a hash mixing
+        constexpr size_t FNV_prime = 1099511628211ULL;
+        constexpr size_t FNV_offset = 14695981039346656037ULL;
+        
+        hash = (hash ^ FNV_offset) * FNV_prime;
+        hash = (hash ^ (hash >> 32)) * FNV_prime;
+        
+        // Fibonacci hashing for better distribution
+        constexpr size_t golden_ratio = 11400714819323198485ULL;
+        
+        // Calculate leading zeros
+        size_t shift = 0;
+        size_t temp = cap;
+        while (temp > 1) {
+            temp >>= 1;
+            shift++;
+        }
+        
+        hash = (hash * golden_ratio) >> (64 - shift);
+        return hash & (cap - 1); // Faster than modulo if capacity is power of 2
+    }
