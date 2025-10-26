@@ -76,12 +76,12 @@ public:
     // rvalue reference &&: binds to a temporary object allowing move semantics
     // no need for const reference since moving modifies the source
     
-    void setKey( keyT&& newKey){
+    void setKey(keyT&& newKey){
         key = std::move(newKey);
     }
     
     // set the entire values vector
-    void setValuesVector( std::vector<valueT>&& newValues){
+    void setValuesVector(std::vector<valueT>&& newValues){
         values = std::move(newValues);
     }
 
@@ -114,31 +114,18 @@ private:
 
     HashFunction<keyT> hashFunc;
 
-    // FMV_1a + Fibonacci hashing
+    // Fast hash function using MurmurHash3 finalizer
     static size_t defaultHash(const keyT& key, size_t cap){
-        // Use std::hash first, so as to work with all types
         size_t hash = std::hash<keyT>{}(key);
         
-        // FNV-1a hash mixing
-        constexpr size_t FNV_prime = 1099511628211ULL;
-        constexpr size_t FNV_offset = 14695981039346656037ULL;
+        // MurmurHash3 finalizer - very fast mixing with excellent avalanche
+        hash ^= hash >> 33;
+        hash *= 0xff51afd7ed558ccdULL;
+        hash ^= hash >> 33;
+        hash *= 0xc4ceb9fe1a85ec53ULL;
+        hash ^= hash >> 33;
         
-        hash = (hash ^ FNV_offset) * FNV_prime;
-        hash = (hash ^ (hash >> 32)) * FNV_prime;
-        
-        // Fibonacci hashing for better distribution
-        constexpr size_t golden_ratio = 11400714819323198485ULL;
-        
-        // Calculate leading zeros
-        size_t shift = 0;
-        size_t temp = cap;
-        while (temp > 1) {
-            temp >>= 1;
-            shift++;
-        }
-        
-        hash = (hash * golden_ratio) >> (64 - shift);
-        return hash & (cap - 1); // Faster than modulo if capacity is power of 2
+        return hash & (cap - 1); // Assumes capacity is power of 2
     }
 
 public:
