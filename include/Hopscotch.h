@@ -81,6 +81,7 @@ class hashNode{
         }
     }
 
+    // set a specific position in hopInfo to false
     void setHopInfoPosToFalse(const size_t& index){
     
         if(index < hopInfo.size()){
@@ -98,7 +99,7 @@ class hashNode{
         values.emplace_back(newValue);
     }
 
-    
+
     template <class keyT2, class valueT2>
     friend class Hopscotch;
     
@@ -106,6 +107,8 @@ class hashNode{
 
 };
 
+// HashFunction is a function pointer that takes a key of type keyT
+//  and a capacity and returns a size_t hash value
 template <class keyT>
 using HashFunction = size_t (*)(const keyT&, size_t);
 
@@ -116,26 +119,31 @@ class Hopscotch{
     size_t size; // current number of elements in the table
     std::vector<hashNode<keyT, valueT>> table;
     size_t hopRange; // range for hopscotch
-    HashFunction<keyT> hashFunc;
+    HashFunction<keyT> hashFunc; // hash function provided by user
 
     public:
     
+    // default hash function 1
     static size_t defaultHash(const keyT& key, size_t capacity);
 
+    // if the user does not provide a hash function, use the default one
     Hopscotch(size_t capacity, size_t hopR, HashFunction<keyT> h = hashFunction): capacity(capacity), size(0), hopRange(hopR), hashFunc(h){
+
+        // Ensure minimum capacity to avoid division by zero and empty table
         if (capacity == 0){
             capacity = 16;
         }
         else{
             // capacity = nextPowerOf2(capacity);
         }
+        // initialize table with empty hashNodes
         table.resize(capacity, hashNode<keyT, valueT>(hopRange));
-        
     }
 
+    // inserts key-value pair into the hash table
     bool hashInsert(const keyT& key, const valueT& value);
 
-    // default hash function using std::hash
+    // default hash function 2 using std::hash
     static size_t hashFunction(const keyT& key, size_t capacity);
     
     
@@ -172,6 +180,8 @@ class Hopscotch{
     // helps functions for unit tests
     
     void printTable() const;
+    
+    // returns the key of the position pos
     size_t getKeyOfPos(const size_t pos) const{
         return table[pos].getKey();
     }
@@ -241,9 +251,9 @@ bool Hopscotch<keyT, valueT>::insertInOriginalPos(const size_t pos, const keyT& 
         table[pos].setKey(key);
         table[pos].addValuetoVector(value);
         table[pos].setOccupied(true);
-        table[pos].resetHopInfo(hopRange); // initialize hop info vector
-        table[pos].setHopInfoPosToTrue(0); // mark first slot in hop info as occupied
+        table[pos].setHopInfoPosToTrue(0); // mark position 0 (the slot itself) as occupied
         size++;
+        
         return true;
     }
     return false;
@@ -256,7 +266,7 @@ bool Hopscotch<keyT, valueT>::isHopInfoFull(const size_t pos) const{
    
     for(size_t i = 0; i < hopRange; ++i){
         
-        // there is at least one slot that is free, or
+        // if there is at least one slot that is free, or
         // occupied by an element that hashed elsewhere
         if(hopInfo[i] == false){
             return false;
@@ -268,16 +278,17 @@ bool Hopscotch<keyT, valueT>::isHopInfoFull(const size_t pos) const{
 
 template <typename keyT, typename valueT>
 size_t Hopscotch<keyT, valueT>::findFreeSlot(const size_t startPos) const{
-    
-    size_t i = startPos;
+
+    size_t i = startPos; // original hashed position
 
     while(true){
 
+        // check if slot is free
         if(table[i].isOccupied() == false){
             return i;
         }
 
-        i = (i + 1) % capacity;
+        i = (i + 1) % capacity; // wrap around
 
         if(i == startPos){ // completed full loop through table
             return capacity; // indicates no free slot found
@@ -304,6 +315,7 @@ bool Hopscotch<keyT, valueT>::insertWithinHopRange(const size_t freeSlot, const 
         }
     }
 
+    // free slot is after hashed position and within hop range
     else if((freeSlot - hashedPos) % capacity < hopRange){
 
         table[freeSlot].setKey(key);
@@ -336,10 +348,10 @@ bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, co
 
     for(size_t i = 1; i < hopRange; ++i){
 
-        if(hopInfo[i] == true){ // slot is occupied by an element that hashed here
+        if(hopInfo[i] == true){ // slot is occupied by an element that hashed in pos
 
             // calculate actual position in table
-            size_t checkPos = (pos + i);
+            size_t checkPos = (pos + i) % capacity;
 
             // check if key matches, if so append value to vector
             if(table[checkPos].isOccupied() && table[checkPos].getKey() == key){
@@ -354,103 +366,93 @@ bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, co
 
 }
 
+
 template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos, 
-    const keyT& key, const valueT& value){
-    
-    // calculate distance from pos to freeSlot with wrap around
-    size_t dist;
-    if (freeSlot >= pos) {
-        dist = freeSlot - pos;
-    } else {
-        dist = capacity - pos + freeSlot; // wrap around
+    const keyT& key, const valueT& value) {
+        
+    // the free slot is outside hop range, now we should move elements
+    // Calculate distance with proper wraparound
+    size_t distance;
+
+    // normal case: freeSlot is after pos
+    if(freeSlot > pos){
+        distance = freeSlot - pos;
     }
 
+    // wrap around case: freeSlot is before pos
+    else{
+        distance = capacity - pos + freeSlot;
+    }
+    
     // while the free slot is outside hop range, swap elements
-    while(dist % capacity >= hopRange){
-
+    while(distance >= hopRange){
+       
         bool moved = false;
         
-        size_t startH; // start position for checking elements to move
-        if (freeSlot > pos) {
-            startH = freeSlot - hopRange + 1;
-        }
-        // if free slot is near the beginning of the table, we wrap around
-        else{
-            startH = (capacity + freeSlot - hopRange + 1) % capacity; // wrap around
-        }
-        
+        // Calculate start position for search with wraparound handling
+        // startH is the first position of the hop range before freeSlot
+        size_t startH = (freeSlot >= hopRange - 1) ? (freeSlot - hopRange + 1) : 0;
+
         size_t slotToMove = capacity; // initialize to invalid index
-        
+
         // iterate from startH to freeSlot to find an element to move
-        for(size_t offset = 0; offset < hopRange; offset++){
+        for(size_t i = startH; i < freeSlot; i++){
             
-            size_t i = (startH + offset) % capacity; // for wrap around
-          
-            // if we have checked all positions before freeSlot, hop range is full
-            if (i == freeSlot){
-                rehash();
-                return hashInsert(key, value);
-            }
+            auto& bitmap = table[i].getHopInfo();           
 
-            auto& bitmap = table[i].getHopInfo();
-
-            // we should check only bits that correspond to slots before freeSlot
+            // check all bits that correspond to slots before freeSlot
             // bit[hopRange - 1] corresponds to freeSlot
             for(size_t bitIndex = 0; bitIndex < hopRange; bitIndex++){
+               
+                // if we reach or exceed freeSlot, stop checking further bits
+                if(i + bitIndex >= freeSlot){
+                    break;
+                }
 
+                // if bit is true, we can move this element
                 if(bitmap[bitIndex] == true){
 
                     slotToMove = (i + bitIndex) % capacity; // actual position of the element to move
                     
+                    // Calculate the new distance from i to freeSlot
+                    size_t newDistance = freeSlot - i;
+                
                     // swap the empty slot with the slotToMove
-                    table[freeSlot].setKey(std::move(table[slotToMove].key));
+                    table[freeSlot].setKey(std::move(table[slotToMove].getKey()));
                     table[freeSlot].setValuesVector(std::move(table[slotToMove].values));
-                    table[freeSlot].setOccupied(true);
+                    table[freeSlot].setOccupied(true); 
+                   
                     
-                    // calculate distance from slotToMove to freeSlot with wrap around
-                    size_t newBitIndex;
-                    if (freeSlot >= slotToMove) {
-                        newBitIndex = freeSlot - slotToMove;
-                    } else {
-                        newBitIndex = capacity - slotToMove + freeSlot;
-                    }
-
-
-                    table[i].setHopInfoPosToTrue(newBitIndex); // set bit to true for the free slot where we moved the element
+                    table[i].setHopInfoPosToTrue(newDistance); // set bit to true for the free slot where we moved the element
                     
                     table[slotToMove].setOccupied(false); // mark old position as free
+                    // Note: slotToMove keeps its hopInfo - it may still track elements that hash to slotToMove
                     table[i].setHopInfoPosToFalse(bitIndex); // update hop info bitmap for old position
 
                     // update variables for next iteration
                     freeSlot = slotToMove; // free slot has now moved closer to original pos
+                    
+                    distance = (freeSlot >= pos) ? (freeSlot - pos) : (capacity - pos + freeSlot); // recalculate distance
                     moved = true;
-
-                      // update distance with wrap around
-                    if (freeSlot >= pos) {
-                        dist = freeSlot - pos;
-                    } else {
-                        dist = capacity - pos + freeSlot; // wrap around
-                    }
-
                     break;
-                }       
+                }      
             }
 
             if (moved == true){
                 break;
             }
-
         }
-        // if no element could be moved, rehash
-        if(moved == false){
+
+        // If no element could be moved, table is too full -> rehash
+        if (!moved) {
             rehash();
             return hashInsert(key, value);
         }
     }
-
     return false;
 }
+    
 
 
 template <typename keyT, typename valueT>
@@ -468,7 +470,7 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
         return true;
     }
 
-    // check if hop info is full, if so table is full and needs rehashing
+    // check if hop info is full, if so table needs rehashing
    if(isHopInfoFull(pos) == true){
         rehash();
         return hashInsert(key, value);
@@ -482,28 +484,22 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
         return hashInsert(key, value);
     }
 
-    // free slot is within hop range, insert directly
+    // if free slot is within hop range, insert directly
     if(insertWithinHopRange(freeSlot, pos, key, value) == true){
         return true;
     }
 
-    size_t dist;
-    if (freeSlot >= pos) {
-        dist = freeSlot - pos;
-    } else {
-        dist = capacity - pos + freeSlot; // wrap around
-    }
+   if(insertAndSwap(freeSlot, pos, key, value) == true){
 
-    // try to move elements to bring free slot within hop range
-    if(insertAndSwap(freeSlot, pos, key, value) == true){
         return true;
     }
 
+    
     // now the free slot is within hop range, insert the new key-value pair
     if(insertWithinHopRange(freeSlot, pos, key, value) == true){
+
         return true;
     }
-    
 
     return false;
 
