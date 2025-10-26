@@ -301,28 +301,22 @@ size_t Hopscotch<keyT, valueT>::findFreeSlot(const size_t startPos) const{
 template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::insertWithinHopRange(const size_t freeSlot, const size_t hashedPos, const keyT& key, const valueT& value){
 
+    size_t distance;
+
     // if free slot is before hashed position: wrap around case
-    if (freeSlot < hashedPos) {
-        // calculate distance with wrap around
-        // capacity - hashedPos: distance from hashedPos to end of table
-        // freeSlot: distance from start of table to freeSlot
-        if ((capacity - hashedPos + freeSlot) < hopRange) {
-            table[freeSlot].setKey(key);
-            table[freeSlot].addValuetoVector(value);
-            table[freeSlot].setOccupied(true);
-        
-            size++;
-
-            // update hop info bitmap at original position
-            table[hashedPos].setHopInfoPosToTrue(capacity - hashedPos + freeSlot);
-            return true;
-        }
+    // capacity - hashedPos: distance from hashedPos to end of table
+    // freeSlot: distance from start of table to freeSlot
+    if(freeSlot < hashedPos){
+        distance = capacity - hashedPos + freeSlot;
     }
-
     // free slot is after hashed position and within hop range
     // distance from hashedPos to freeSlot
-    else if((freeSlot - hashedPos) % capacity < hopRange){
+    else{
+        distance = freeSlot - hashedPos;
+    }
 
+    // if within hop range, insert directly
+    if (distance < hopRange) {
         table[freeSlot].setKey(key);
         table[freeSlot].addValuetoVector(value);
         table[freeSlot].setOccupied(true);
@@ -330,11 +324,10 @@ bool Hopscotch<keyT, valueT>::insertWithinHopRange(const size_t freeSlot, const 
         size++;
 
         // update hop info bitmap at original position
-        table[hashedPos].setHopInfoPosToTrue(freeSlot - hashedPos);
+        table[hashedPos].setHopInfoPosToTrue(distance);
         return true;
     }
-    
-    return false;
+    return false;  
 }
 
 
