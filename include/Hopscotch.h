@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <cstdint>
 
 // Helper function: returns the smallest power of 2 >= n
 // is used in Capacity of hash tables
@@ -24,13 +25,14 @@ class hashNode{
     keyT key;
     std::vector<valueT> values;
     bool is_occupied;
-    std::vector<bool> hopInfo; // to track which slots in hop range are occupied
+    uint32_t hopInfo; // to track which slots in hop range are occupied
     // that were initially hashed to this index
 
     public:
 
-    hashNode(size_t hopRange): is_occupied(false) {
-        hopInfo.resize(hopRange, false);
+    hashNode(size_t hopRange): is_occupied(false), hopInfo(0) {
+        // hopInfo is represented as a bitmask in an integer
+        // initialize all bits to 0
     }
 
       //#### GETTERS ####//
@@ -53,7 +55,7 @@ class hashNode{
         return values;
     }
 
-    inline const std::vector<bool>& getHopInfo() const {
+    inline const uint32_t& getHopInfo() const {
         return hopInfo;
     }
 
@@ -61,24 +63,24 @@ class hashNode{
 
     // reset hopInfo vector with false values
     void resetHopInfo(size_t hopRange){
-        hopInfo.clear();
-        hopInfo.resize(hopRange, false);
+        hopInfo = 0;
     }
 
     // set a specific position in hopInfo to true
     void setHopInfoPosToTrue(const size_t& index){
-    
-        if(index < hopInfo.size()){
-            hopInfo[index] = true;
-        }
+        // 1u: unsigned integer with value 1
+        // left shift by index positions so only bit index is 1
+        // bitwise OR with hopInfo to set that bit to 1
+        hopInfo |= (1u << index);
     }
 
     // set a specific position in hopInfo to false
     void setHopInfoPosToFalse(const size_t& index){
-    
-        if(index < hopInfo.size()){
-            hopInfo[index] = false;
-        }
+        // ~ bitwise not: inverts all bits of (1u << index)
+        // bitwise AND with hopInfo to clear that bit to 0
+        // hopinfo = 1101, 1u << 2 = 0100, ~ = 1011
+        // 1101 & 1011 = 1001
+        hopInfo &= ~(1u << index);
     }
 
     // allow Hopscotch class to access private members
@@ -172,8 +174,19 @@ class Hopscotch{
         return table[pos].getKey();
     }
 
-    std::vector<bool> getHopInfoBitmap(const size_t pos) const{
+    uint32_t getHopInfoBitmap(const size_t pos) const{
         return table[pos].getHopInfo();
+    }
+
+    // returns vector representation of hop info bitmap at pos
+    // used for unit tests
+    std::vector<bool> getHopInfoToVector(const size_t pos) const {
+        auto& hopInfo = table[pos].getHopInfo();
+        std::vector<bool> result(hopRange);
+        for(size_t i = 0; i < hopRange; ++i){
+            result[i] = (hopInfo >> i) & 1;
+        }
+        return result;
     }
     
     std::vector<valueT> getValuesVectorOfPos(const size_t pos) const{
@@ -247,16 +260,12 @@ template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::isHopInfoFull(const size_t pos) const{
 
     auto& hopInfo = table[pos].getHopInfo();
-   
-    for(size_t i = 0; i < hopRange; ++i){
-        
-        // if there is at least one slot that is free, or
-        // occupied by an element that hashed elsewhere
-        if(hopInfo[i] == false){
-            return false;
-        }
-    }
-    return true;
+
+    // Create mask with all bits set to 1
+    uint32_t fullMask = (1u << hopRange) - 1;
+
+    return hopInfo == fullMask;
+    
 }
 
 
@@ -316,19 +325,16 @@ bool Hopscotch<keyT, valueT>::insertWithinHopRange(const size_t freeSlot, const 
 template <typename keyT, typename valueT>
 bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, const valueT& value){
 
-    // if the key already exists in original hashed position, append value to vector
-
-    if(table[pos].isOccupied() && table[pos].getKey() == key){
-        table[pos].values.push_back(value);
-        return true;
-    }
-
-    // check other positions within hop range
+    // check if the key already exists in positions indicated by hop info bitmap
+    // if so append value to vector
     auto& hopInfo = table[pos].getHopInfo();
 
-    for(size_t i = 1; i < hopRange; ++i){
+    for(size_t i = 0; i < hopRange; ++i){
 
-        if(hopInfo[i] == true){ // slot is occupied by an element that hashed in pos
+        // check if bit i is 1
+        // if hopinfo = 1010 and i = 1 -> 1u << i = 0010
+        // hopinfo & 0010 = 0010 -> true
+        if(hopInfo & (1u << i)){ // slot is occupied by an element that hashed in pos
 
             // calculate actual position in table
             size_t checkPos = (pos + i) % capacity;
@@ -399,7 +405,7 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
             }
 
             // get hop info bitmap of current position
-            auto& bitmap = table[i].getHopInfo();           
+            auto& hopInfo = table[i].getHopInfo();
 
             // check all bits of the bitmap
             for(size_t bitIndex = 0; bitIndex < hopRange-1; bitIndex++){
@@ -411,7 +417,8 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
                 }
 
                 // if bit is true, we can move this element
-                if(bitmap[bitIndex] == true){
+                // result is non-zero if bit at bitIndex is 1
+                if(hopInfo & (1u << bitIndex)){ 
 
                     slotToMove = (i + bitIndex) % capacity; // actual position of the element to move
                     
@@ -528,17 +535,13 @@ const std::vector<valueT> Hopscotch<keyT, valueT>::hashSearch(const keyT& key) c
 
     size_t pos = hashFunc(key, capacity);
 
-    // check if the key at hashed position matches
-    if(table[pos].isOccupied() && table[pos].getKey() == key){
-        return table[pos].getValue();
-    }
-
     // check other positions within hop range
     auto& hopInfo = table[pos].getHopInfo();
 
-    for(size_t i = 1; i < hopRange; ++i){
+    for(size_t i = 0; i < hopRange; ++i){
 
-        if(hopInfo[i] == true){ // slot is occupied by an element that hashed here
+        // result is non-zero if bit at i is 1
+        if(hopInfo & (1u << i)){ // slot is occupied by an element that hashed here
 
             size_t checkPos = (pos + i) % capacity;
 

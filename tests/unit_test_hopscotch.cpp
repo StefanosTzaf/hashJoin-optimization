@@ -32,13 +32,13 @@ void test_simple_insertion(){
     assert(table.getKeyOfPos(3) == 2);
 
     // bitmap of pos 1 should be [1 1 0] since keys 1,11 hashed there but 2 hashes to pos 2
-    assert(table.getHopInfoBitmap(1) == vector<bool>({true, true, false}));
+    assert(table.getHopInfoToVector(1) == vector<bool>({true, true, false}));
 
     assert(table.hashInsert(3, "three") == true); // collides with key 2, should be placed in next pos 4
     assert(table.getKeyOfPos(4) == 3);
 
     // bitmap of pos 2 should be [0 1 0 ] since only key 2 hashed there and was put in pos 3
-    assert(table.getHopInfoBitmap(2) == vector<bool>({false, true, false}));
+    assert(table.getHopInfoToVector(2) == vector<bool>({false, true, false}));
     
     assert(table.hashInsert(5, "five") == true); // simple insertion at original position
     assert(table.getKeyOfPos(5) == 5);
@@ -50,13 +50,13 @@ void test_simple_insertion(){
     assert(table.getKeyOfPos(7) == 16);
 
     // bitmap of pos 6 should be [1 1 0] since 6, 16 hashed there
-    assert(table.getHopInfoBitmap(6) == vector<bool>({true, true, false})); 
+    assert(table.getHopInfoToVector(6) == vector<bool>({true, true, false})); 
     
     assert(table.hashInsert(26, "twenty-six") == true); // original pos:6, next pos 7 is occupied by 16 so it is placed in pos 8
     assert(table.getKeyOfPos(8) == 26);
 
     // bitmap of pos 6 should be now [1 1 1] since 6,16,26 hashed there
-    assert(table.getHopInfoBitmap(6) == vector<bool>({true, true, true}));
+    assert(table.getHopInfoToVector(6) == vector<bool>({true, true, true}));
 
     assert(table.hashInsert(1, "one-again") == true); // inserting duplicate key
     assert(table.getSize() == 9); // size does not increase for duplicate key
@@ -109,13 +109,13 @@ void test_rehashing(){
     assert(table.getKeyOfPos(7) == 26);
 
     // bitmap of pos 6 should be [1 1 0] since 6, 26 hashed there
-    assert(table.getHopInfoBitmap(6) == vector<bool>({true, true, false}));
+    assert(table.getHopInfoToVector(6) == vector<bool>({true, true, false}));
 
     // key 36 hashes to pos 16, next available slot after 16 is pos 17
     assert(table.getKeyOfPos(17) == 36); 
 
     // bitmap of pos 16 should be [1 1 0] since 16, 36 hashed there
-    assert(table.getHopInfoBitmap(16) == vector<bool>({true, true, false}));
+    assert(table.getHopInfoToVector(16) == vector<bool>({true, true, false}));
 
     // table.printTable();
    
@@ -183,13 +183,13 @@ void test_swapping_elements(){
     assert(table.getKeyOfPos(3) == 12);
 
     // pos 2 should have bitmap [1 1 0] since keys 2 and 12 hashed there
-    assert(table.getHopInfoBitmap(2) == vector<bool>({true, true, false}));
+    assert(table.getHopInfoToVector(2) == vector<bool>({true, true, false}));
 
     // pos 5 should have a bitmap of [0 0 1] since it is now free and was moved from pos 7
-    assert(table.getHopInfoBitmap(5) == vector<bool>({false, false, true}));
+    assert(table.getHopInfoToVector(5) == vector<bool>({false, false, true}));
 
     // pos 3 should have bitmap [0 0 1] since it is now free and was moved from pos 5
-    assert(table.getHopInfoBitmap(3) == vector<bool>({false, false, true}));
+    assert(table.getHopInfoToVector(3) == vector<bool>({false, false, true}));
 
     // trying to insert 22 which hashes to pos 2, so it should be put in pos 4
     // since 2,3 are occupied
@@ -197,18 +197,18 @@ void test_swapping_elements(){
     
     // free slot: 8, should be swapped with pos 6
     // bitmap of pos 6 should now be [0 0 1]
-    assert(table.getHopInfoBitmap(6) == vector<bool>({false, false, true}));
+    assert(table.getHopInfoToVector(6) == vector<bool>({false, false, true}));
 
     // free slot is now: 6, should be swapped with pos 4
     // bitmap of pos 4 should now be [0 0 1]
-    assert(table.getHopInfoBitmap(4) == vector<bool>({false, false, true}));
+    assert(table.getHopInfoToVector(4) == vector<bool>({false, false, true}));
 
     // free slot is now: 4, which is within hop range of pos 2
     // so 22 should be placed there
     assert(table.getKeyOfPos(4) == 22);
 
     // bitmap of pos 2 should now be [1 1 1] since 2,12,22 hashed there
-    assert(table.getHopInfoBitmap(2) == vector<bool>({true, true, true}));
+    assert(table.getHopInfoToVector(2) == vector<bool>({true, true, true}));
 
 
 
@@ -240,11 +240,11 @@ void test_swapping_elements_2(){
     // first free slot is pos 5, which is outside hop range of pos 0
     // pos 5 should be swapped with pos 4 and not pos 3 since it has no elements in its hop range that can be moved
     // now pos 4 is free and has bitmap [0 1 0]
-    assert(table.getHopInfoBitmap(4) == vector<bool>({false, true, false}));
+    assert(table.getHopInfoToVector(4) == vector<bool>({false, true, false}));
 
     // then pos 4 should be swapped with pos 2
     // now pos 2 is free and has bitmap [0 1 1]
-    assert(table.getHopInfoBitmap(2) == vector<bool>({false, true, true}));
+    assert(table.getHopInfoToVector(2) == vector<bool>({false, true, true}));
 
     // pos 2 is within hop range of pos 0, so 10 should be placed there
     assert(table.getKeyOfPos(2) == 10);
@@ -301,7 +301,7 @@ void test_wrap_around_insertion(){
     // so 19 should be placed there
     assert(table.getKeyOfPos(1) == 19);
     // bitmap of pos 9 should be [1 0 1] since keys 9 and 19 hashed there
-    assert(table.getHopInfoBitmap(9) == vector<bool>({true, false, true}));
+    assert(table.getHopInfoToVector(9) == vector<bool>({true, false, true}));
 
     // table.printTable();
 }
@@ -327,16 +327,16 @@ void test_wrap_around_insertion_with_swapping(){
     
     // first free slot is pos 4, which is outside hop range of pos 9
     // pos 4 should be swapped with pos 2 which will have a bitmap of [0 0 1]
-    assert(table.getHopInfoBitmap(2) == vector<bool>({false, false, true}));
+    assert(table.getHopInfoToVector(2) == vector<bool>({false, false, true}));
     
     // now pos 2 is free and should be swapped with pos 0 which will have a bitmap of [0 0 1]
-    assert(table.getHopInfoBitmap(0) == vector<bool>({false, false, true}));
+    assert(table.getHopInfoToVector(0) == vector<bool>({false, false, true}));
     
     // now pos 0 is free and is within hop range of pos 9 due to wrap around
     // so 19 should be placed there
     assert(table.getKeyOfPos(0) == 19);
     // bitmap of pos 9 should be [1 1 0] since keys 9 and 19 hashed there
-    assert(table.getHopInfoBitmap(9) == vector<bool>({true, true, false}));
+    assert(table.getHopInfoToVector(9) == vector<bool>({true, true, false}));
     
     // table.printTable();
     
