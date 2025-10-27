@@ -11,10 +11,12 @@
     #include "Hopscotch.h"
     template<typename K, typename V>
     using CustomHashTable = Hopscotch<K, V>;
+
 #elif defined(USE_CUCKOO)
     #include "cuckoo.h"  // Assuming you have this header
     template<typename K, typename V>
     using CustomHashTable = CuckooHashTable<K, V>;
+
 #else
     #error "No hash table algorithm specified. Use -DUSE_ROBINHOOD, -DUSE_HOPSCOTCH, or -DUSE_CUCKOO"
 #endif
@@ -255,6 +257,17 @@ ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
 
 ColumnarTable execute(const Plan& plan, [[maybe_unused]] void* context) {
     namespace views = ranges::views;
+
+    // Print which hash table implementation is being used. Only to see that the right implementation is compiled
+    //especially in tests II ADDS TIME IN QUERIES
+// #if defined(USE_ROBINHOOD)
+//     std::cout << "Using Robin Hood Hash Table" << std::endl;
+// #elif defined(USE_HOPSCOTCH)
+//     std::cout << "Using Hopscotch Hash Table" << std::endl;
+// #elif defined(USE_CUCKOO)
+//     std::cout << "Using Cuckoo Hash Table" << std::endl;
+// #endif
+    
     auto ret        = execute_impl(plan, plan.root); // row-based table
     
     // output_attrs: vector of tuples of (column index, data type)
