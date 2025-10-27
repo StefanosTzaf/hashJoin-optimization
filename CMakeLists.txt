@@ -71,12 +71,15 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc|powerpc|ppc64|ppc64le")
 endif()
 FetchContent_MakeAvailable(duckdb)
 
-# Include all sources from /src directory. CONFIGURE_DEPENDS can be unreliable.
-# Try re-running cmake in case changes are not recognized.
-file(GLOB SIGMODPC_SRC
-    CONFIGURE_DEPENDS
-    "src/*.cpp"
+# Explicitly list sources to avoid pulling both engine variants into the same target.
+set(COMMON_SOURCES
+    src/build_table.cpp
+    src/csv_parser.cpp
+    src/statement.cpp
 )
+
+set(BASE_ENGINE src/execute.cpp)
+set(CUSTOM_ENGINE src/myExecute.cpp)
 
 # Enable server-specific compiler optimizations.
 # Use march=native for all but Power servers, which results in the following error:
@@ -87,9 +90,17 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc|powerpc|ppc64|ppc64le")
 endif()
 
 # Targets
-add_executable(run ${SIGMODPC_SRC} tests/read_sql.cpp)
-add_executable(unit_tests ${SIGMODPC_SRC} tests/unit_tests.cpp)
+# Default run uses the base engine implementation
+add_executable(run ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+add_executable(unit_tests ${COMMON_SOURCES} ${BASE_ENGINE} tests/unit_tests.cpp)
 add_executable(build_database tests/build_database.cpp)
+
+# Variants: choose hashing backend by selecting the executable
+add_executable(run_robin ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
+target_compile_definitions(run_robin PRIVATE USE_ROBINHOOD)
+
+add_executable(run_cuckoo ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
+target_compile_definitions(run_cuckoo PRIVATE USE_CUCKOO)
 
 # For all executables
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -99,22 +110,36 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 endif()
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    add_executable(build_cache ${SIGMODPC_SRC} tests/read_sql.cpp)
-    add_executable(fast ${SIGMODPC_SRC} tests/read_sql.cpp)
+    add_executable(build_cache ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+    add_executable(fast ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+
+    # Fast variants with custom hash table backends
+    add_executable(fast_robin ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
+    target_compile_definitions(fast_robin PRIVATE USE_ROBINHOOD)
+    add_executable(fast_cuckoo ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
+    target_compile_definitions(fast_cuckoo PRIVATE USE_CUCKOO)
 
     target_link_libraries(build_cache PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
     target_compile_definitions(build_cache PRIVATE TEAMOPT_USE_DUCKDB TEAMOPT_BUILD_CACHE)
     target_link_libraries(fast PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser)
+    target_link_libraries(fast_robin PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser)
+    target_link_libraries(fast_cuckoo PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser)
     target_include_directories(build_cache PRIVATE include)
     target_include_directories(fast PRIVATE include)
+    target_include_directories(fast_robin PRIVATE include)
+    target_include_directories(fast_cuckoo PRIVATE include)
 endif()
 
 target_link_libraries(run PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
+target_link_libraries(run_robin PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
+target_link_libraries(run_cuckoo PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
 target_compile_definitions(run PRIVATE TEAMOPT_USE_DUCKDB)
 target_link_libraries(build_database PRIVATE fmt duckdb)
 target_link_libraries(unit_tests PRIVATE re2 range-v3 fmt Catch2::Catch2WithMain)
 
 target_include_directories(run PRIVATE include)
+target_include_directories(run_robin PRIVATE include)
+target_include_directories(run_cuckoo PRIVATE include)
 target_include_directories(build_database PRIVATE include)
 target_include_directories(unit_tests PRIVATE include)
 
