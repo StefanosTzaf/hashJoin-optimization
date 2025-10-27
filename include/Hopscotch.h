@@ -59,14 +59,6 @@ class hashNode{
 
         //#### SETTERS ####//
 
-    inline void setOccupied(const bool status){
-        is_occupied = status;
-    }
-
-    void setKey(const keyT& newKey){
-        key = newKey;
-    }
-
     // reset hopInfo vector with false values
     void resetHopInfo(size_t hopRange){
         hopInfo.clear();
@@ -87,16 +79,6 @@ class hashNode{
         if(index < hopInfo.size()){
             hopInfo[index] = false;
         }
-    }
-
-     // set the entire values vector
-    void setValuesVector( std::vector<valueT>&& newValues){
-        values = std::move(newValues);
-    }
-
-     // add a single value to the values vector
-    void addValuetoVector(const valueT& newValue){
-        values.emplace_back(newValue);
     }
 
     // allow Hopscotch class to access private members
@@ -250,9 +232,9 @@ bool Hopscotch<keyT, valueT>::insertInOriginalPos(const size_t pos, const keyT& 
     // if the hashed position is free, insert directly
     if(table[pos].isOccupied() == false){
 
-        table[pos].setKey(key);
-        table[pos].addValuetoVector(value);
-        table[pos].setOccupied(true);
+        table[pos].key = key;
+        table[pos].values.push_back(value);
+        table[pos].is_occupied = true;
         table[pos].setHopInfoPosToTrue(0); // mark position 0 (the slot itself) as occupied
         size++;
         
@@ -317,10 +299,10 @@ bool Hopscotch<keyT, valueT>::insertWithinHopRange(const size_t freeSlot, const 
 
     // if within hop range, insert directly
     if (distance < hopRange) {
-        table[freeSlot].setKey(key);
-        table[freeSlot].addValuetoVector(value);
-        table[freeSlot].setOccupied(true);
-    
+        table[freeSlot].key = key;
+        table[freeSlot].values.push_back(value);
+        table[freeSlot].is_occupied = true;
+
         size++;
 
         // update hop info bitmap at original position
@@ -337,7 +319,7 @@ bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, co
     // if the key already exists in original hashed position, append value to vector
 
     if(table[pos].isOccupied() && table[pos].getKey() == key){
-        table[pos].addValuetoVector(value);
+        table[pos].values.push_back(value);
         return true;
     }
 
@@ -353,7 +335,7 @@ bool Hopscotch<keyT, valueT>::insertDuplicateKey(size_t pos, const keyT& key, co
 
             // check if key matches, if so append value to vector
             if(table[checkPos].isOccupied() && table[checkPos].getKey() == key){
-                table[checkPos].addValuetoVector(value);
+                table[checkPos].values.push_back(value);
                 return true;
             }
         }
@@ -408,13 +390,19 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
         size_t slotToMove = capacity; // initialize to invalid index
 
         // iterate from startH to freeSlot to find an element to move
-        for(size_t i = startH; i < freeSlot; i++){
-            
+        for(size_t offset = 0; offset < hopRange - 1; offset++){
+           
+            size_t i = (startH + offset) % capacity;
+
+            if(i == freeSlot){
+                break; // reached freeSlot, stop searching
+            }
+
             // get hop info bitmap of current position
             auto& bitmap = table[i].getHopInfo();           
 
             // check all bits of the bitmap
-            for(size_t bitIndex = 0; bitIndex < hopRange; bitIndex++){
+            for(size_t bitIndex = 0; bitIndex < hopRange-1; bitIndex++){
                
                 // if we reach or exceed freeSlot, stop checking further bits
                 // we should only consider bits that point to positions before freeSlot
@@ -428,18 +416,24 @@ bool Hopscotch<keyT, valueT>::insertAndSwap(size_t& freeSlot, const size_t pos,
                     slotToMove = (i + bitIndex) % capacity; // actual position of the element to move
                     
                     // Calculate the new distance from i to freeSlot
-                    size_t newDistance = freeSlot - i;
+                    size_t newDistance;
+                    if (freeSlot >= i) {
+                        newDistance = freeSlot - i;
+                    } else {
+                        newDistance = capacity - i + freeSlot;
+                    }
+                    
                 
                     // swap the empty slot with the slotToMove
-                    table[freeSlot].setKey(std::move(table[slotToMove].getKey()));
-                    table[freeSlot].setValuesVector(std::move(table[slotToMove].values));
-                    table[freeSlot].setOccupied(true); 
-                   
-                    
+                    // Using direct member access since Hopscotch is a friend class
+                    table[freeSlot].key = std::move(table[slotToMove].key);        
+                    table[freeSlot].values = std::move(table[slotToMove].values);
+                    table[freeSlot].is_occupied = true;
+
                     table[i].setHopInfoPosToTrue(newDistance); // set bit to true of the free slot where we moved the element
                     table[i].setHopInfoPosToFalse(bitIndex); // set bit of old position to false, since it is now empty
-                    
-                    table[slotToMove].setOccupied(false); // mark old position as free
+
+                    table[slotToMove].is_occupied = false; // mark old position as free
 
                     // update variables for next iteration
                     freeSlot = slotToMove; // free slot has now moved closer to original pos
@@ -510,12 +504,14 @@ bool Hopscotch<keyT, valueT>::hashInsert(const keyT& key, const valueT& value){
         return true;
     }
 
+    // free slot is outside hop range, try to swap elements to bring it closer
+    // returns true only if it rehashed and recursively inserted the element
    if(insertAndSwap(freeSlot, pos, key, value) == true){
-
         return true;
     }
 
-    
+    // at this point insertAndSwap returned false, since it did not insert the element
+    // but brought freeSlot within hop range
     // now the free slot is within hop range, insert the new key-value pair
     if(insertWithinHopRange(freeSlot, pos, key, value) == true){
 
