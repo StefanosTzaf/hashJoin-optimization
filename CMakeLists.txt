@@ -110,14 +110,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 endif()
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    add_executable(build_cache ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
-    add_executable(fast ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+    # Exclude fast targets from default 'all' build; build via explicit target 'fast'
+    add_executable(build_cache EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+
+    add_executable(fast EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
 
     # Fast variants with custom hash table backends
-    add_executable(fast_robin ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
+    add_executable(fast_robin EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
     target_compile_definitions(fast_robin PRIVATE USE_ROBINHOOD)
-    add_executable(fast_cuckoo ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
+    add_executable(fast_cuckoo EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${CUSTOM_ENGINE} tests/read_sql.cpp)
     target_compile_definitions(fast_cuckoo PRIVATE USE_CUCKOO)
+
+    # Ensure 'cmake --build ... fast' builds all three fast executables
+    add_dependencies(fast fast_robin fast_cuckoo)
 
     target_link_libraries(build_cache PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
     target_compile_definitions(build_cache PRIVATE TEAMOPT_USE_DUCKDB TEAMOPT_BUILD_CACHE)
@@ -142,7 +147,3 @@ target_include_directories(run_robin PRIVATE include)
 target_include_directories(run_cuckoo PRIVATE include)
 target_include_directories(build_database PRIVATE include)
 target_include_directories(unit_tests PRIVATE include)
-
-
-
-

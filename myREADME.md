@@ -1,11 +1,13 @@
 compiles with 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev 
-as before, and then with
-cmake --build build -- -j $(nproc) run run_cuckoo run_robin
+cmake --build build -- -j $(nproc) or cmake --build build -- -j $(nproc) fast
 to build the new executables.               
 
-new executables are running with script run_engine.sh:
+New executables have been created in the build directory: run, run_robin, run_cuckoo, and run_hopscotch.
+(if made with cache support, they will be named fast, fast_robin, fast_cuckoo, and fast_hopscotch).
 
+You can run the different engines with the following commands:
 ./run_engine.sh base plans.json
 ./run_engine.sh cuckoo plans.json
 ./run_engine.sh robin plans.json
+
