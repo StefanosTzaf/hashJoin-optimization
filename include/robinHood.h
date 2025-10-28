@@ -118,7 +118,7 @@ private:
     static size_t defaultHash(const keyT& key, size_t cap){
         size_t hash = std::hash<keyT>{}(key);
         
-        // MurmurHash3 finalizer - very fast mixing with excellent avalanche
+        // MurmurHash3 finalizer
         hash ^= hash >> 33;
         hash *= 0xff51afd7ed558ccdULL;
         hash ^= hash >> 33;
@@ -136,8 +136,8 @@ public:
     bool hashInsert(const keyT& key, const valueT& value);
 
     void rehash();
-    void printTable(); // for debugging
 
+    void printTable(); // for debugging
 
     // returns vector of values for the given key
     const std::vector<valueT> hashSearch(const keyT& key) const;
@@ -145,14 +145,17 @@ public:
     size_t getSize() const{
         return size;
     }
+
     size_t getCapacity() const{
         return capacity;
     }
+
     float getLoadFactor() const {
         return capacity ? static_cast<float>(size) / static_cast<float>(capacity) : 0.0f;
     }
 
     //------------------------------Test associated functions------------------------------------
+    // finally used in rehash as well
     size_t findPosition(const keyT& key) const {
         size_t pos = hashFunc(key, capacity);
         size_t currSpl = 0;
@@ -176,7 +179,7 @@ public:
             }
 
             currSpl++;
-            i = (i + 1) % capacity;
+            i = (i + 1) & (capacity - 1);
             if (i == pos){
                 break;
             }
@@ -207,7 +210,7 @@ public:
             }
 
             currSpl++;
-            i = (i + 1) % capacity;
+            i = (i + 1) & (capacity - 1);
             if (i == pos){
                 break;
             }
@@ -223,7 +226,7 @@ public:
 // using namespace std;
 
 template <typename keyT, typename valueT>
-// dynamically allocate table(vector)
+// dynamically (internally we do not have to do new and delete) allocate table(vector)
 RobinHoodHashTable<keyT, valueT>::RobinHoodHashTable(size_t initialCapacity, HashFunction<keyT> h)
     : size(0), hashFunc(h) {
     // Round up to next power of 2
@@ -302,7 +305,7 @@ bool RobinHoodHashTable<keyT, valueT>::hashInsert(const keyT& key, const valueT&
         }
 
         inputPsl++; // one position further from ideal position   
-        i = (i + 1) % capacity; // move to next position (circular)
+        i = (i + 1) & (capacity - 1); // move to next position (circular)
         if (i == pos) { // completed a full loop
             break;
         }
@@ -327,15 +330,16 @@ void RobinHoodHashTable<keyT, valueT>::rehash(){
     table = std::vector<hashNode<keyT, valueT>>(capacity);
 
     // for each node in old table
-    for (const auto& node : oldTable) {
+    for (auto node : oldTable) {
 
         // Skip empty nodes
         if (node.isOccupied()) {
-
-            // for each value in the values vector of the node, reinsert
-            for (const auto& value : node.getValue()) {
-                hashInsert(node.getKey(), value);
+            hashInsert(node.getKey(), node.getValue()[0]); // insert first value
+            size_t pos = findPosition(node.getKey()); // find position in new table
+            if (node.getValue().size() > 1) {
+                table[pos].setValuesVector(std::move(node.values));
             }
+            
         }
     }
 }
@@ -368,7 +372,7 @@ const std::vector<valueT> RobinHoodHashTable<keyT, valueT>::hashSearch(const key
         }
 
         currSpl++; // one position further from ideal position
-        i = (i + 1) % capacity; // move to next position (circular)
+        i = (i + 1) & (capacity - 1); // move to next position (circular)
         if (i == pos)   { // completed a full loop
             break;
         }

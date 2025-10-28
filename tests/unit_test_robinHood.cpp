@@ -19,7 +19,7 @@ size_t testHash1(const int& key, size_t cap) {
     return key % cap;
 }
 
-void test_RobinHood_insertion(){
+void test_1(){
  
     RobinHoodHashTable<int, string> table(7, testHash1);
     assert(table.getSize() == 0);
@@ -100,14 +100,49 @@ void test_RobinHood_insertion(){
 
     vector<string> values3 = table.hashSearch(100);
     assert(values3.size() == 0); // key not found
-    
-    cout << "\nAll unit tests passed!\n";
+
+    cout << "\nCollision tests passed\n";
 
 }
 
 
+void test_2() {
+    // Start with small initialCapacity to force multiple rehashes
+    RobinHoodHashTable<int, std::string> table(16, testHash1);
+
+    for (int i = 0; i < 2000; ++i) {
+        bool ok = table.hashInsert(i, "value" + std::to_string(i));
+        assert(ok);
+    }
+
+    assert(table.getSize() == 2000);
+    for (int i = 0; i < 3000; ++i) {
+        auto vals = table.hashSearch(i);
+        assert(vals.size() == 1);
+        assert(vals[0] == ("value" + std::to_string(i)));
+    }
+
+    // duplicates: insert many values for same key and check order preserved
+    int dupKey = 42;
+    table.hashInsert(dupKey, "dup1");
+    table.hashInsert(dupKey, "dup2");
+    table.hashInsert(dupKey, "dup3");
+    auto d = table.hashSearch(dupKey);
+    assert(d.size() >= 3);
+    assert(d[0] == "dup1");
+    assert(d[1] == "dup2");
+    assert(d[2] == "dup3");
+
+    size_t notFound = table.findPosition(-999999);
+    assert(notFound == -1);
+
+    std::cout << "Edge-case tests passed\n";
+}
+
+
 int main(){
-    test_RobinHood_insertion();
+    test_1();
+    test_2();
     return 0;
 }
 
