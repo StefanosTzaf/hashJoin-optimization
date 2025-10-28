@@ -83,6 +83,11 @@ class hashNode{
         hopInfo &= ~(1u << index);
     }
 
+    // set values vector by moving from an rvalue reference
+    void setValuesVector(const std::vector<valueT>&& vals){
+        values = std::move(vals);
+    }
+
     // allow Hopscotch class to access private members
     template <class keyT2, class valueT2>
     friend class Hopscotch;
@@ -195,7 +200,9 @@ class Hopscotch{
     
     // returns vector of values for the given key
     const std::vector<valueT> hashSearch(const keyT& key) const;
-    
+
+    // returns the position where the key is found, or capacity if not found
+    const size_t hashSearchPos(const keyT& key) const;
 };
 
 
@@ -223,16 +230,18 @@ void Hopscotch<keyT, valueT>::rehash(){
     // create new table with updated capacity
     table = std::vector<hashNode<keyT, valueT>>(capacity, hashNode<keyT, valueT>(hopRange));
 
+
     // for each node in old table
-    for (const auto& node : oldTable) {
+    for ( auto node : oldTable) {
 
         // Skip empty nodes
         if (node.isOccupied()) {
 
-            // for each value in the values vector of the node, reinsert
-            for (const auto& value : node.getValue()) {
-                hashInsert(node.getKey(), value);
-            }
+            hashInsert(node.getKey(), node.getValue()[0]); // insert first value
+
+           // if there are duplicates, insert them as well
+            size_t newPos = hashSearchPos(node.getKey());
+            table[newPos].setValuesVector(std::move(node.getValue()));
         }
     }
 
@@ -553,6 +562,31 @@ const std::vector<valueT> Hopscotch<keyT, valueT>::hashSearch(const keyT& key) c
 
     // key not found, return empty vector
     return std::vector<valueT>();
+}
+
+template <typename keyT, typename valueT>
+const size_t Hopscotch<keyT, valueT>::hashSearchPos(const keyT& key) const{
+
+    size_t pos = hashFunc(key, capacity);
+
+    // check other positions within hop range
+    auto& hopInfo = table[pos].getHopInfo();
+
+    for(size_t i = 0; i < hopRange; ++i){
+
+        // result is non-zero if bit at i is 1
+        if(hopInfo & (1u << i)){ // slot is occupied by an element that hashed here
+
+            size_t checkPos = (pos + i) % capacity;
+
+            if(table[checkPos].isOccupied() && table[checkPos].getKey() == key){
+                return checkPos;
+            }
+        }
+    }
+
+    // key not found, return capacity
+    return capacity;
 }
 
 template <typename keyT, typename valueT>
