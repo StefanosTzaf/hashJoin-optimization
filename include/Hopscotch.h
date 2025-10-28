@@ -117,7 +117,7 @@ class Hopscotch{
     static size_t defaultHash(const keyT& key, size_t cap);
 
     // if the user does not provide a hash function, use the default one
-    Hopscotch(size_t cap, size_t hopR, HashFunction<keyT> h = hashFunction): capacity(cap), size(0), hopRange(hopR), hashFunc(h){
+    Hopscotch(size_t cap, size_t hopR = 32, HashFunction<keyT> h = hashFunction): capacity(cap), size(0), hopRange(hopR), hashFunc(h){
 
         // Ensure minimum capacity to avoid division by zero and empty table
         if (cap == 0){

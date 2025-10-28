@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <iostream>
+#include <cstdint>
 #define MAX_LOAD_FACTOR 0.5
 
 // Helper function: returns the smallest power of 2 >= n
