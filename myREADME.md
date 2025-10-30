@@ -10,9 +10,11 @@ Parts implemented by each member:
  
  <Runnincg the new executables>
     compiles with :
-    -- cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev 
-    -- cmake --build build -- -j $(nproc) OR cmake --build build -- -j $(nproc) fast
-    to build the new executables.               
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev 
+        cmake --build build -- -j $(nproc) 
+        or
+        cmake --build build -- -j $(nproc) fast
+        to build the new executables.               
 
     New executables have been created in the build directory: run, run_robin, run_cuckoo, and run_hopscotch.
     (if made with cache support, they will be named fast, fast_robin, fast_cuckoo, and fast_hopscotch).
@@ -34,14 +36,22 @@ Parts implemented by each member:
 First of all , we implemented a multimap , where each key can map to multiple values. In the base implementation, that was done by the user of the hash table passing a vector of values for each key.
 We tried both ways but finally (since there was not a significant difference in performance) we kept the vector of values inside the hash node itself, because it seemed to us more correct in terms of encapsulation.
 
-Default hash function is MurmurHash3 finalizer but the user can provide their own hash function as a template parameter when constructing the hash table. We did that so as to be able to set an easy nhash function for testing purposes in order to know exactly where each key will be mapped in the table.
-
+Default hash function is MurmurHash3 finalizer but the user can provide their own hash function as a template parameter when constructing the hash table. We did that so as to be able to set an easy hash function for testing purposes in order to know exactly where each key will be mapped in the table.
 
 We ensured that the capacity of the table is always a power of 2, so that we can use bitwise AND instead of modulo for calculating the index from the hash value. This improves performance.
 
 
 <Hopscotch Hash Table implementation>
 
+Similar to the robinhood implementation, we used a multimap and a vector for the duplicate values. The hop range can be given trough the constructor, but a default value of 32 is given which we kept as best(in case of change the type of the bitmap number should be changed, but we supposed this will not be needed since the hop range is a standard number).
+The hash function, can be provided from the user as well, through the constructor, but std::hash is declared as the default one. 
+
+- Hash insert: consists of 6 helper functions so it can be more readable. Initially, we check if the element already exists in the table through *insertDuplicateKey()*. If so, the value is appended to the existing vector. Next we check if it can be inserted in its original hashing position through *insertInOriginalPos()* . If not, the procedure goes on with checking wether or not the neighborhood is full or not. 
+*isHopInfoFull()* returns true if all bits of the bitmap are true, in which case the table needs rehashing. *FindFreeSlot* starts checking linearly the table for a free position or rehashes if there is none. If that free position is within the hop range, *insertWithinHopRange()* inserts it there. *insertAndSwap()* implements the main logic of swapping the empty position with an appropriate element and brings the former as close to the neighborhood of the original hashed position as possible. 
+
+- Hash search: this is the function where the performance of the hopscotch algorithm is based on and for a given key it calculates its hash value and only checks its bitmap for the existence of the key. Specifically, it checks the positions which have a valid bit and compares their keys to the one we are looking for.
+
+We tried optimizing the algorithm to decrease its execution time, but did not manage to. Possible critical parts which could slow down the execution might be the insertAndSwap logic where hashInsert is called recursively after rehashing. 
 
 
 <Cuckoo Hash Table implementation>
