@@ -28,15 +28,15 @@ if [ $# -eq 0 ]; then
         echo "Missing test: unit_tests_cuckoo -- Run Cmake to build it."
         exit 1
     fi
-    echo -e "\n\tRunning existing Tests for base solution in Robinhood implementation \n"
+    echo -e "\n\tRunning existing Tests with Robinhood implementation \n"
     ./build/unit_tests_base_robin
     echo -e "\n\tRunning our Robinhood-specific Tests \n"
     ./build/unit_tests_robin
-    echo -e "\n\tRunning existing Tests for base solution in Hopscotch implementation \n"
+    echo -e "\n\tRunning existing Tests with Hopscotch implementation \n"
     ./build/unit_tests_base_hopscotch
     echo -e "\n\tRunning our Hopscotch-specific Tests \n"
     ./build/unit_tests_hopscotch
-    echo -e "\n\tRunning existing Tests for base solution in Cuckoo implementation \n"
+    echo -e "\n\tRunning existing Tests with Cuckoo implementation \n"
     ./build/unit_tests_base_cuckoo
     echo -e "\n\tRunning our Cuckoo-specific Tests \n"
     ./build/unit_tests_cuckoo
@@ -54,7 +54,7 @@ elif [ -n "$1" ]; then
                 exit 1
             fi
 
-            echo -e "\n\tRunning existing Tests for base solution in Robinhood implementation \n"
+            echo -e "\n\tRunning existing Tests with Robinhood implementation \n"
             ./build/unit_tests_base_robin
             echo -e "\n\tRunning our Robinhood-specific Tests \n"
             ./build/unit_tests_robin
@@ -71,7 +71,7 @@ elif [ -n "$1" ]; then
                 exit 1
             fi
 
-            echo -e "\n\tRunning existing Tests for base solution in Hopscotch implementation \n"
+            echo -e "\n\tRunning existing Tests with Hopscotch implementation \n"
             ./build/unit_tests_base_hopscotch
             echo -e "\n\tRunning our Hopscotch-specific Tests \n"
             ./build/unit_tests_hopscotch
@@ -87,7 +87,7 @@ elif [ -n "$1" ]; then
                 echo "Missing test: unit_tests_cuckoo -- Run Cmake to build it."
                 exit 1
             fi
-            echo -e "\n\tRunning existing Tests for base solution in Cuckoo implementation \n"
+            echo -e "\n\tRunning existing Tests with Cuckoo implementation \n"
             ./build/unit_tests_base_cuckoo
             echo -e "\n\tRunning our Cuckoo-specific Tests \n"
             ./build/unit_tests_cuckoo
@@ -129,15 +129,15 @@ elif [ -n "$1" ]; then
                 echo "Missing test: unit_tests_cuckoo -- Run Cmake to build it."
                 exit 1
             fi
-            echo -e "\n\tRunning existing Tests for base solution in Robinhood implementation \n"
+            echo -e "\n\tRunning existing Tests with Robinhood implementation \n"
             ./build/unit_tests_base_robin
             echo -e "\n\tRunning our Robinhood-specific Tests \n"
             ./build/unit_tests_robin
-            echo -e "\n\tRunning existing Tests for base solution in Hopscotch implementation \n"
+            echo -e "\n\tRunning existing Tests with Hopscotch implementation \n"
             ./build/unit_tests_base_hopscotch
             echo -e "\n\tRunning our Hopscotch-specific Tests \n"
             ./build/unit_tests_hopscotch
-            echo -e "\n\tRunning existing Tests for base solution in Cuckoo implementation \n"
+            echo -e "\n\tRunning existing Tests with Cuckoo implementation \n"
             ./build/unit_tests_base_cuckoo
             echo -e "\n\tRunning our Cuckoo-specific Tests \n"
             ./build/unit_tests_cuckoo

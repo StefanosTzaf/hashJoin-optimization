@@ -593,8 +593,10 @@ template <typename keyT, typename valueT>
 void Hopscotch<keyT, valueT>::printHopInfoBitmap(size_t pos) const{
 
     std::cout << "[" ;
+    auto hopInfo = table[pos].getHopInfo();
     for(size_t i = 0; i < hopRange; ++i){
-        std::cout << " " << table[pos].getHopInfo()[i];
+        // print each bit of hopInfo
+        std::cout << " " << ((hopInfo >> i) & 1);
     }
     std::cout << " ]   ";
 }
