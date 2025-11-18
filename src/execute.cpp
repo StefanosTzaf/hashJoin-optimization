@@ -228,7 +228,7 @@ bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
 }
 
 
-std::vector<std::vector<Data>> Table::copy_scan(const ColumnarTable& table,
+std::vector<std::vector<Data>> my_copy_scan(const ColumnarTable& table,
      const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
     
     namespace views = ranges::views;
@@ -388,7 +388,7 @@ ExecuteResult execute_scan(const Plan& plan, const ScanNode& scan,
     
     auto table_id = scan.base_table_id;
     auto& input = plan.inputs[table_id];
-    return Table::copy_scan(input, output_attrs);
+    return my_copy_scan(input, output_attrs);
 }
 
 ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
