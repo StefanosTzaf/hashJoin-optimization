@@ -6,6 +6,8 @@ namespace Contest {
 
 // similar to typedef: write ExecuteResult instead of std::vector<std::vector<Data>>
 // this is row-based
+// Data is std::variant<int32_t, int64_t, double, std::string, std::monostate>
+// and holds one value of any of these types
 using ExecuteResult = std::vector<std::vector<Data>>;
 
 // recursively computes the result of the plan node with index node_idx
@@ -216,6 +218,168 @@ ExecuteResult execute_hash_join(const Plan&          plan,
     }
 
     // this is filled by the run<T> method
+    return results;
+}
+
+bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
+    auto byte_idx = idx / 8;
+    auto bit      = idx % 8;
+    return bitmap[byte_idx] & (1u << bit);
+}
+
+
+std::vector<std::vector<Data>> Table::copy_scan(const ColumnarTable& table,
+     const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
+    
+    namespace views = ranges::views;
+    
+    // result is a vector of rows, each element of the outer vector is a row
+    std::vector<std::vector<Data>> results(table.num_rows,
+        std::vector<Data>(output_attrs.size(), std::monostate{}));
+    
+    // stores data type of each column
+    std::vector<DataType>          types(table.columns.size());
+    
+    // process columns from begin to end(indexes of output_attrs)
+    auto task = [&](size_t begin, size_t end) {
+        size_t col_pap = 0;
+        
+        // iterate throfugh all columns to be processed
+        for (size_t column_idx = begin; column_idx < end; ++column_idx) {
+            
+            size_t in_col_idx = std::get<0>(output_attrs[column_idx]);
+            auto& column = table.columns[in_col_idx];
+            types[in_col_idx] = column.type;
+            size_t row_idx = 0;
+            
+            // iterate through all pages of the column
+            for (auto* page:
+                column.pages | views::transform([](auto* page) { return page->data; })) {
+                    
+                    // check data type of column
+                    switch (column.type) {
+    
+                    case DataType::INT32: {
+                        auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
+                        auto* data_begin = reinterpret_cast<int32_t*>(page + 4); // data of int32 starts at offset 4
+                        
+                        // bitmap is at the end of the page
+                        // indicates whether the corresponding row is null or not
+                        auto* bitmap =
+                            reinterpret_cast<uint8_t*>(page + PAGE_SIZE - (num_rows + 7) / 8);
+                        
+                        uint16_t data_idx = 0;
+        
+                        for (uint16_t i = 0; i < num_rows; ++i) {
+                            
+                            // if the i-th row is not null
+                            if (get_bitmap(bitmap, i)) {
+                                // data_idx++ increments it by sizeof(int32_t) bytes
+                                auto value = data_begin[data_idx++]; // get the actual int32 value
+        
+                                if (row_idx >= table.num_rows) { // check if row index is valid
+                                    throw std::runtime_error("row_idx");
+                                }
+                                
+                                results[row_idx][column_idx].emplace<int32_t>(value); // store value in results
+        
+                                ++row_idx; // move to next row
+
+                            } else { // row is null so continue
+                                ++row_idx;
+                            }
+                        }
+                        break;
+                    }
+               
+                    case DataType::VARCHAR: {
+                        auto num_rows = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
+                        
+                        // LONG string page (first page of string)
+                        if (num_rows == 0xffff) {
+                            auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
+                            auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
+                          
+                            std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
+        
+                            if (row_idx >= table.num_rows) {
+                                throw std::runtime_error("row_idx");
+                            }
+        
+                            results[row_idx++][column_idx].emplace<std::string>(std::move(value));
+        
+                        } 
+                        // LONG string (following page)
+                        else if (num_rows == 0xfffe) {
+                            auto  num_chars  = *reinterpret_cast<uint16_t*>(page + 2);
+                            auto* data_begin = reinterpret_cast<char*>(page + 4);
+        
+                            std::visit(
+                                [data_begin, num_chars](auto& value) {
+                                    using T = std::decay_t<decltype(value)>;
+                                    if constexpr (std::is_same_v<T, std::string>) {
+                                        value.insert(value.end(), data_begin, data_begin + num_chars);
+                                    } else {
+                                        throw std::runtime_error(
+                                            "long string page 0xfffe must follows a string");
+                                    }
+                                },
+                                results[row_idx - 1][column_idx]);
+                        } 
+                        
+                        // REGULAR string page
+                        else {
+                            auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2); // num of non null strings
+                            
+                            // array of offsets of strings, each offset is 2 bytes
+                            auto* offset_begin = reinterpret_cast<uint16_t*>(page + 4); 
+
+                            // actual string data starts after offsets
+                            auto* data_begin   = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
+                            auto* string_begin = data_begin;
+                            
+                            auto* bitmap =
+                                reinterpret_cast<uint8_t*>(page + PAGE_SIZE - (num_rows + 7) / 8);
+                            
+                            
+                            uint16_t data_idx = 0;
+                
+                            for (uint16_t i = 0; i < num_rows; ++i) {
+                                
+                                // if the i-th row is not null
+                                if (get_bitmap(bitmap, i)) {
+                                   
+                                    auto        offset = offset_begin[data_idx++]; // get offset of string
+
+                                    // construct new string by copying bytes in range
+                                    std::string value{string_begin, data_begin + offset};
+
+                                    // update string_begin to point to end of current string
+                                    string_begin = data_begin + offset;
+                
+                                    if (row_idx >= table.num_rows) {
+                                        throw std::runtime_error("row_idx");
+                                    }
+                                   
+                                    results[row_idx++][column_idx].emplace<std::string>(std::move(value));
+                                } 
+                                // row is null, continue with next row
+                                else {
+                                    ++row_idx;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    // run the task in parallel using the filter thread pool
+    // each task processes a subset of columns
+    filter_tp.run(task, output_attrs.size());
+
     return results;
 }
 
