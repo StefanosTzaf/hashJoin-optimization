@@ -3,18 +3,59 @@
 #include <table.h>
 #include <inner_column.h>
 
-struct stringRef{
+// value_t can hold either an int32_t or a stringRef or Null
+// since pages are 8192 bytes we can use 3 Most Significant Bits of offset to indicate type!!!
+// if we have an integer we can store it in tableIdx + columnIdx since they are not needed in that case
+struct value_t {
     uint16_t tableIdx; // which table the string belongs to
     uint16_t columnIdx; // column of the table where the string is located
     uint16_t pageIdx; // page index within the column
     uint16_t offset; // offset of string within page
-};
 
+    // this is used so as to take the 3 MSB bits of offset for type tagging
+    static constexpr uint16_t TYPE_MASK = 0xC000;  // 11.....
+    static constexpr uint16_t NULL_TAG  = 0x0000;  // 00.....
+    static constexpr uint16_t INT_TAG   = 0x4000;  // 01.....
+    static constexpr uint16_t STR_TAG   = 0x8000;  // 10.....
+    static constexpr uint16_t OFFSET_MASK = 0x1FFF; 
 
-// value_t can hold either an int32_t or a stringRef
-union value_t {
-    int32_t intValue;
-    stringRef strRef;
+    // constructor
+    value_t() : tableIdx(NULL_TAG), columnIdx(0), pageIdx(0), offset(NULL_TAG) {}
+
+    // create a value_t representing an integer
+    static value_t from_int(int32_t val) {
+        value_t v;
+        // uint32_t so as to avoid sign extension during bit shifts
+        uint32_t uval = static_cast<uint32_t>(val);
+        v.tableIdx = static_cast<uint16_t>(uval >> 16);  // high 16 bits
+        v.columnIdx = static_cast<uint16_t>(uval & 0xFFFF);  // low 16 bits
+        v.pageIdx = 0;
+        v.offset = INT_TAG;  // type tag only
+        return v;
+    }
+
+    // Create value_t from string reference
+    static value_t from_string_ref(uint16_t table, uint16_t col, 
+                                    uint16_t page, uint16_t off) {
+        value_t v;
+        v.tableIdx = table;
+        v.columnIdx = col;
+        v.pageIdx = page;
+         v.offset = STR_TAG | (off & OFFSET_MASK);  // type + 13 bits offset
+        return v;
+    }
+
+    // Type checks
+    bool is_null() const { return (offset & TYPE_MASK) == NULL_TAG; }
+    bool is_int() const { return (offset & TYPE_MASK) == INT_TAG; }
+    bool is_string() const { return (offset & TYPE_MASK) == STR_TAG; }
+
+    // Getters
+    int32_t get_int() const {
+        uint32_t high = static_cast<uint32_t>(tableIdx) << 16;
+        uint32_t low = columnIdx;
+        return static_cast<int32_t>(high | low);
+    }
 };
 
 
@@ -25,7 +66,7 @@ namespace Contest {
 // this is row-based
 // Data is std::variant<int32_t, int64_t, double, std::string, std::monostate>
 // and holds one value of any of these types
-using ExecuteResult = std::vector<std::vector<Data>>;
+using ExecuteResult = std::vector<std::vector<value_t>>;
 
 // recursively computes the result of the plan node with index node_idx
 // depending on its type: ScanNode or JoinNode
@@ -235,13 +276,14 @@ bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
 
 // converts columnar table to row-based format
 std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
-     const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
+     const std::vector<std::tuple<size_t, DataType>>& output_attrs, uint16_t table_id) {
     
     namespace views = ranges::views;
     
     // result is a vector of rows, each element of the outer vector is a row
+    // initialize all values to null (with NULLTAG in default constructor of value_t)
     std::vector<std::vector<value_t>> results(table.num_rows,
-        std::vector<value_t>(output_attrs.size())); // initialize with null values
+        std::vector<value_t>(output_attrs.size()));
     
     // stores data type of each column
     std::vector<DataType>          types(table.columns.size());
@@ -257,11 +299,12 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
             auto& column = table.columns[in_col_idx];
             types[in_col_idx] = column.type;
             size_t row_idx = 0;
+            uint16_t page_idx = 0;
             
             // iterate through all pages of the column
             for (auto* page:
                 column.pages | views::transform([](auto* page) { return page->data; })) {
-                    
+                    ++page_idx;
                     // check data type of column: either INT32 or VARCHAR
                     switch (column.type) {
     
@@ -287,7 +330,7 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                     throw std::runtime_error("row_idx");
                                 }
                                 
-                                results[row_idx][column_idx].intValue = value;
+                                results[row_idx][column_idx] = value_t::from_int(value); // store the int value in results
         
                                 ++row_idx; // move to next row
 
@@ -301,37 +344,37 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                     case DataType::VARCHAR: {
                         auto num_rows = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
                         
-                        // // LONG string page (first page of string)
-                        // if (num_rows == 0xffff) {
-                        //     auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
-                        //     auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
+                        // LONG string page (first page of string)
+                        if (num_rows == 0xffff) {
+                            auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
+                            auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
                           
-                        //     std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
+                            std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
         
-                        //     if (row_idx >= table.numA_rows) {
-                        //         throw std::runtime_error("row_idx");
-                        //     }
+                            if (row_idx >= table.numA_rows) {
+                                throw std::runtime_error("row_idx");
+                            }
         
-                        //     results[row_idx++][column_idx].emplace<std::string>(std::move(value));
+                            results[row_idx++][column_idx].emplace<std::string>(std::move(value));
         
-                        // } 
-                        // // LONG string (following page)
-                        // else if (num_rows == 0xfffe) {
-                        //     auto  num_chars  = *reinterpret_cast<uint16_t*>(page + 2);
-                        //     auto* data_begin = reinterpret_cast<char*>(page + 4);
+                        } 
+                        // LONG string (following page)
+                        else if (num_rows == 0xfffe) {
+                            auto  num_chars  = *reinterpret_cast<uint16_t*>(page + 2);
+                            auto* data_begin = reinterpret_cast<char*>(page + 4);
         
-                        //     std::visit(
-                        //         [data_begin, num_chars](auto& value) {
-                        //             using T = std::decay_t<decltype(value)>;
-                        //             if constexpr (std::is_same_v<T, std::string>) {
-                        //                 value.insert(value.end(), data_begin, data_begin + num_chars);
-                        //             } else {
-                        //                 throw std::runtime_error(
-                        //                     "long string page 0xfffe must follows a string");
-                        //             }
-                        //         },
-                        //         results[row_idx - 1][column_idx]);
-                        // } 
+                            std::visit(
+                                [data_begin, num_chars](auto& value) {
+                                    using T = std::decay_t<decltype(value)>;
+                                    if constexpr (std::is_same_v<T, std::string>) {
+                                        value.insert(value.end(), data_begin, data_begin + num_chars);
+                                    } else {
+                                        throw std::runtime_error(
+                                            "long string page 0xfffe must follows a string");
+                                    }
+                                },
+                                results[row_idx - 1][column_idx]);
+                        } 
                         
                         // REGULAR string page
                         else {
@@ -359,6 +402,8 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
 
                                     // construct new string by copying bytes in range
                                     std::string value{string_begin, data_begin + offset};
+                                    
+
 
                                     // update string_begin to point to end of current string
                                     string_begin = data_begin + offset;
@@ -367,7 +412,8 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                         throw std::runtime_error("row_idx");
                                     }
                                    
-                                    results[row_idx++][column_idx].emplace<std::string>(std::move(value));
+                                    results[row_idx++][column_idx] = value_t::from_string_ref(
+                                        table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, offset);
                                 } 
                                 // row is null, continue with next row
                                 else {
@@ -394,7 +440,7 @@ ExecuteResult execute_scan(const Plan& plan, const ScanNode& scan,
     
     auto table_id = scan.base_table_id;
     auto& input = plan.inputs[table_id];
-    return my_copy_scan(input, output_attrs);
+    return my_copy_scan(input, output_attrs, static_cast<uint16_t>(table_id));
 }
 
 ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
