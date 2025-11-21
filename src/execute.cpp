@@ -13,11 +13,11 @@ struct value_t {
     uint16_t dataIdx; // index of the string within the page
 
     // this is used so as to take the 2 MSB bits of offset for type tagging
-    static constexpr uint16_t TYPE_MASK = 0xC000;  // 110.....
+    static constexpr uint16_t TYPE_MASK = 0xE000;  // 111.....
     static constexpr uint16_t NULL_TAG  = 0x0000;  // 000.....
     static constexpr uint16_t INT_TAG   = 0x4000;  // 010.....
     static constexpr uint16_t STR_TAG   = 0x8000;  // 100.....
-    static constexpr uint16_t LONG_STR_TAG = 0xD000; // 111.....
+    static constexpr uint16_t LONG_STR_TAG = 0xA000; // 101.....
     static constexpr uint16_t OFFSET_MASK = 0x1FFF; // 0001 1111 1111 1111
 
     // constructor
@@ -42,14 +42,24 @@ struct value_t {
         v.tableIdx = table;
         v.columnIdx = col;
         v.pageIdx = page;
-        v.dataIdx = STR_TAG | (off & OFFSET_MASK);  // type + 13 bits data index
+        
+        if ((off & TYPE_MASK) == LONG_STR_TAG) {
+            v.dataIdx = LONG_STR_TAG | (off & OFFSET_MASK);  // especial case for long strings
+        }
+        else {
+            v.dataIdx = STR_TAG | (off & OFFSET_MASK);  // type + 13 bits data index
+        }
+        
         return v;
     }
 
     // Type checks
     bool is_null() const { return (dataIdx & TYPE_MASK) == NULL_TAG; }
     bool is_int() const { return (dataIdx & TYPE_MASK) == INT_TAG; }
-    bool is_string() const { return (dataIdx & TYPE_MASK) == STR_TAG; }
+    bool is_string() const { 
+        auto tag = dataIdx & TYPE_MASK;
+        return tag == STR_TAG || tag == LONG_STR_TAG;
+    }
 
     // Getters
     int32_t get_int() const {
@@ -413,17 +423,26 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
         auto& column = table.columns[col_idx];
         auto* page = column.pages[page_idx]->data;
 
-        if(v.dataIdx == value_t::LONG_STR_TAG){
+        if((v.dataIdx & value_t::TYPE_MASK) == value_t::LONG_STR_TAG){
             size_t num_chars = *reinterpret_cast<uint16_t*>(page + 2);           
             auto* data_begin = reinterpret_cast<char*>(page + 4);
             std::string result(data_begin, data_begin + num_chars);
 
-            // Now handle next page
-            auto* next_page = column.pages[page_idx + 1]->data;
-            size_t next_num_chars = *reinterpret_cast<uint16_t*>(next_page + 2);
-            auto* next_data_begin = reinterpret_cast<char*>(next_page + 4);
-            result.append(next_data_begin, next_data_begin + next_num_chars);
 
+            auto* next_page = column.pages[++page_idx]->data;
+            size_t type_of_next = *reinterpret_cast<uint16_t*>(next_page);
+            while(type_of_next == 0xfffe){ // While we have more LONG string pages
+
+                // Now handle next page
+                size_t next_num_chars = *reinterpret_cast<uint16_t*>(next_page + 2);
+                auto* next_data_begin = reinterpret_cast<char*>(next_page + 4);
+                result.append(next_data_begin, next_data_begin + next_num_chars);
+
+                next_page = column.pages[++page_idx]->data;
+                type_of_next = *reinterpret_cast<uint16_t*>(next_page);
+
+            }
+            
             return result;
         }
         else{
@@ -450,10 +469,7 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
     
             // return the string by copying bytes from data_begin up to offset
             return std::string(data_begin + prevOffset, data_begin + offset);
-        }
-
-      
-        
+        }    
         
     }
     throw std::runtime_error("Unknown value_t type");
