@@ -10,17 +10,17 @@ struct value_t {
     uint16_t tableIdx; // which table the string belongs to
     uint16_t columnIdx; // column of the table where the string is located
     uint16_t pageIdx; // page index within the column
-    uint16_t offset; // offset of string within page
+    uint16_t dataIdx; // index of the string within the page
 
-    // this is used so as to take the 3 MSB bits of offset for type tagging
-    static constexpr uint16_t TYPE_MASK = 0xC000;  // 11.....
-    static constexpr uint16_t NULL_TAG  = 0x0000;  // 00.....
-    static constexpr uint16_t INT_TAG   = 0x4000;  // 01.....
-    static constexpr uint16_t STR_TAG   = 0x8000;  // 10.....
-    static constexpr uint16_t OFFSET_MASK = 0x1FFF; 
+    // this is used so as to take the 2 MSB bits of offset for type tagging
+    static constexpr uint16_t TYPE_MASK = 0xC000;  // 110.....
+    static constexpr uint16_t NULL_TAG  = 0x0000;  // 000.....
+    static constexpr uint16_t INT_TAG   = 0x4000;  // 010.....
+    static constexpr uint16_t STR_TAG   = 0x8000;  // 100.....
+    static constexpr uint16_t OFFSET_MASK = 0x1FFF; // 0001 1111 1111 1111
 
     // constructor
-    value_t() : tableIdx(NULL_TAG), columnIdx(0), pageIdx(0), offset(NULL_TAG) {}
+    value_t() : tableIdx(NULL_TAG), columnIdx(0), pageIdx(0), dataIdx(NULL_TAG) {}
 
     // create a value_t representing an integer
     static value_t from_int(int32_t val) {
@@ -30,7 +30,7 @@ struct value_t {
         v.tableIdx = static_cast<uint16_t>(uval >> 16);  // high 16 bits
         v.columnIdx = static_cast<uint16_t>(uval & 0xFFFF);  // low 16 bits
         v.pageIdx = 0;
-        v.offset = INT_TAG;  // type tag only
+        v.dataIdx = INT_TAG;  // type tag only
         return v;
     }
 
@@ -41,14 +41,14 @@ struct value_t {
         v.tableIdx = table;
         v.columnIdx = col;
         v.pageIdx = page;
-         v.offset = STR_TAG | (off & OFFSET_MASK);  // type + 13 bits offset
+        v.dataIdx = STR_TAG | (off & OFFSET_MASK);  // type + 13 bits data index
         return v;
     }
 
     // Type checks
-    bool is_null() const { return (offset & TYPE_MASK) == NULL_TAG; }
-    bool is_int() const { return (offset & TYPE_MASK) == INT_TAG; }
-    bool is_string() const { return (offset & TYPE_MASK) == STR_TAG; }
+    bool is_null() const { return (dataIdx & TYPE_MASK) == NULL_TAG; }
+    bool is_int() const { return (dataIdx & TYPE_MASK) == INT_TAG; }
+    bool is_string() const { return (dataIdx & TYPE_MASK) == STR_TAG; }
 
     // Getters
     int32_t get_int() const {
@@ -296,7 +296,7 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                             // if the i-th row is not null
                             if (get_bitmap(bitmap, i)) {
                                 // data_idx++ increments it by sizeof(int32_t) bytes
-                                auto value = data_begin[data_idx++]; // get the actual int32 value
+                                auto value = data_begin[data_idx]; // get the actual int32 value
         
                                 if (row_idx >= table.num_rows) { // check if row index is valid
                                     throw std::runtime_error("row_idx");
@@ -305,6 +305,7 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                 results[row_idx][column_idx] = value_t::from_int(value); // store the int value in results
         
                                 ++row_idx; // move to next row
+                                ++data_idx; // move to next data index
 
                             } else { // row is null so continue
                                 ++row_idx;
@@ -370,11 +371,7 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                 // if the i-th row is not null
                                 if (get_bitmap(bitmap, i)) {
                                    
-                                    auto        offset = offset_begin[data_idx++]; // get offset of string
-
-                                    // // construct new string by copying bytes in range
-                                    // std::string value{string_begin, data_begin + offset};
-                                    
+                                    auto        offset = offset_begin[data_idx]; // get offset of string
 
 
                                     // update string_begin to point to end of current string
@@ -384,8 +381,11 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                         throw std::runtime_error("row_idx");
                                     }
                                    
-                                    results[row_idx++][column_idx] = value_t::from_string_ref(
-                                        table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, offset);
+                                    results[row_idx][column_idx] = value_t::from_string_ref(
+                                        table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
+
+                                    data_idx++; // move to next string offset
+                                    row_idx++;  // move to next row
                                 } 
                                 // row is null, continue with next row
                                 else {
@@ -446,19 +446,33 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
         uint16_t table_idx = v.tableIdx;
         uint16_t col_idx = v.columnIdx;
         uint16_t page_idx = v.pageIdx;
-        uint16_t offset = v.offset & value_t::OFFSET_MASK;
-        
+
         // Access the page and extract the string
         auto& column = table.columns[col_idx];
         auto* page = column.pages[page_idx]->data;
-
-        auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2);
         
-        // data_begin points to the start of string data
-        auto* data_begin   = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
+        // the first 3 bits are set to 0 to get the data index
+        auto idx = v.dataIdx & value_t::OFFSET_MASK;
+        auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2);
+        auto* offset_begin = reinterpret_cast<uint16_t*>(page + 4);
+   
+        // this is where the string ends
+        uint16_t offset = offset_begin[idx];       
+        uint16_t prevOffset = 0;
+        
+        if (idx != 0) {
+        
+            // this is where the previous string ends
+            // and where the current string starts
+            prevOffset = offset_begin[idx-1];
+        }
+      
+        
+        // this is where the actual strings start
+        auto* data_begin = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
 
         // return the string by copying bytes from data_begin up to offset
-        return std::string(data_begin, data_begin + offset);
+        return std::string(data_begin + prevOffset, data_begin + offset);
         
     }
     throw std::runtime_error("Unknown value_t type");
@@ -469,6 +483,7 @@ std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, con
     
     std::vector<std::vector<Data>> data_results; // final result in Data format
     data_results.reserve(results.size());
+
     
     for (const auto& row : results) {
         
@@ -489,6 +504,7 @@ std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, con
                 auto& table = plan.inputs[table_idx];
                 Data data_value = valuet_to_Data(val, table); // convert value_t to Data
                 data_row.emplace_back(std::move(data_value));
+
             }
         }
         
