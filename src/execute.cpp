@@ -17,6 +17,7 @@ struct value_t {
     static constexpr uint16_t NULL_TAG  = 0x0000;  // 000.....
     static constexpr uint16_t INT_TAG   = 0x4000;  // 010.....
     static constexpr uint16_t STR_TAG   = 0x8000;  // 100.....
+    static constexpr uint16_t LONG_STR_TAG = 0xD000; // 111.....
     static constexpr uint16_t OFFSET_MASK = 0x1FFF; // 0001 1111 1111 1111
 
     // constructor
@@ -319,35 +320,19 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                         
                         // LONG string page (first page of string)
                         if (num_rows == 0xffff) {
-                            auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
-                            auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
-                          
-                            // std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
-        
+                            
                             if (row_idx >= table.num_rows) {
                                 throw std::runtime_error("row_idx");
                             }
                             
-
-                            // results[row_idx++][column_idx].emplace<std::string>(std::move(value));
-        
+                            results[row_idx][column_idx] = value_t::from_string_ref(
+                                        table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, value_t::LONG_STR_TAG);
+                            row_idx++;  // move to next row
                         } 
                         // LONG string (following page)
                         else if (num_rows == 0xfffe) {
-                            // auto  num_chars  = *reinterpret_cast<uint16_t*>(page + 2);
-                            // auto* data_begin = reinterpret_cast<char*>(page + 4);
-        
-                            // std::visit(
-                            //     [data_begin, num_chars](auto& value) {
-                            //         using T = std::decay_t<decltype(value)>;
-                            //         if constexpr (std::is_same_v<T, std::string>) {
-                            //             value.insert(value.end(), data_begin, data_begin + num_chars);
-                            //         } else {
-                            //             throw std::runtime_error(
-                            //                 "long string page 0xfffe must follows a string");
-                            //         }
-                            //     },
-                            //     results[row_idx - 1][column_idx]);
+                            // second page will be handled in materialization since we know that it
+                            // is the continuation of a long string
                         } 
                         
                         // REGULAR string page
@@ -419,46 +404,56 @@ ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
 // converts a value_t to Data type
 Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
    
-    if (v.is_null()) {
-        return std::monostate{};
-    }
-
-    if (v.is_int()) {
-        return v.get_int();
-    }
 
     if (v.is_string()) {
         // Materialize the string from the page
         uint16_t table_idx = v.tableIdx;
         uint16_t col_idx = v.columnIdx;
         uint16_t page_idx = v.pageIdx;
-
-        // Access the page and extract the string
         auto& column = table.columns[col_idx];
         auto* page = column.pages[page_idx]->data;
-        
-        // the first 3 bits are set to 0 to get the data index
-        auto idx = v.dataIdx & value_t::OFFSET_MASK;
-        auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2);
-        auto* offset_begin = reinterpret_cast<uint16_t*>(page + 4);
-   
-        // this is where the string ends
-        uint16_t offset = offset_begin[idx];       
-        uint16_t prevOffset = 0;
-        
-        if (idx != 0) {
-        
-            // this is where the previous string ends
-            // and where the current string starts
-            prevOffset = offset_begin[idx-1];
+
+        if(v.dataIdx == value_t::LONG_STR_TAG){
+            size_t num_chars = *reinterpret_cast<uint16_t*>(page + 2);           
+            auto* data_begin = reinterpret_cast<char*>(page + 4);
+            std::string result(data_begin, data_begin + num_chars);
+
+            // Now handle next page
+            auto* next_page = column.pages[page_idx + 1]->data;
+            size_t next_num_chars = *reinterpret_cast<uint16_t*>(next_page + 2);
+            auto* next_data_begin = reinterpret_cast<char*>(next_page + 4);
+            result.append(next_data_begin, next_data_begin + next_num_chars);
+
+            return result;
         }
+        else{
+
+            // Access the page and extract the string
+            
+            // the first 3 bits are set to 0 to get the data index
+            auto idx = v.dataIdx & value_t::OFFSET_MASK;
+            auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2);
+            auto* offset_begin = reinterpret_cast<uint16_t*>(page + 4);
+    
+            // this is where the string ends
+            uint16_t offset = offset_begin[idx];       
+            uint16_t prevOffset = 0;
+            
+            if (idx != 0) {
+            
+                // this is where the previous string ends
+                // and where the current string starts
+                prevOffset = offset_begin[idx-1];
+            }
+            // this is where the actual strings start
+            auto* data_begin = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
+    
+            // return the string by copying bytes from data_begin up to offset
+            return std::string(data_begin + prevOffset, data_begin + offset);
+        }
+
       
         
-        // this is where the actual strings start
-        auto* data_begin = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
-
-        // return the string by copying bytes from data_begin up to offset
-        return std::string(data_begin + prevOffset, data_begin + offset);
         
     }
     throw std::runtime_error("Unknown value_t type");
@@ -476,6 +471,7 @@ std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, con
         std::vector<Data> data_row;
         data_row.reserve(row.size());
         
+        // val is of type value_t
         for (const auto& val : row) {
          
             if (val.is_null()) {
