@@ -56,6 +56,7 @@ struct value_t {
         uint32_t low = columnIdx;
         return static_cast<int32_t>(high | low);
     }
+
 };
 
 
@@ -87,7 +88,7 @@ struct JoinAlgorithm {
 
         // STEP 1: the hash table for joining: type of join key, vector of row indexes that contain the key: 
         // one key might correspond to multiple rows
-        std::unordered_map<T, std::vector<size_t>> hash_table;
+        std::unordered_map<int32_t, std::vector<size_t>> hash_table;
 
          // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
         // CALCULATE THE HASH VALUE OF EACH KEY AND STORE IT IN THE HASH TABLE
@@ -96,34 +97,19 @@ struct JoinAlgorithm {
 
             // iterates over all rows of left table with row index idx
             // record: the actual row
-            for (auto&& [idx, record]: left | views::enumerate) {
+            for (auto&& [idx, record]: left | views::enumerate) {                        
 
-                         
-                // use of visit because record[left_col] is a Data variant
-                // it might contain an int, double, string etc
-                std::visit(
-                    [&hash_table, idx = idx](const auto& key) {
+                int32_t key = record[left_col].get_int();
 
-                        // holds the type of key
-                        using Tk = std::decay_t<decltype(key)>;
+                // try to find the key in the hash table
+                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                    // append idx to the appropriate vector of the hash table
+                    hash_table.emplace(key, std::vector<size_t>(1, idx));
 
-                         // if the key's type matches the join type, insert it into hash table
-                        if constexpr (std::is_same_v<Tk, T>) {
-
-                            // try to find the key in the hash table
-                            if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                // append idx to the appropriate vector of the hash table
-                                hash_table.emplace(key, std::vector<size_t>(1, idx));
-
-                            // if not found, create new entry in hash table with idx
-                            } else {
-                                itr->second.push_back(idx);
-                            }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
-                        }
-                    },
-                    record[left_col]); // extracts the join key
+                // if not found, create new entry in hash table with idx
+                } else {
+                    itr->second.push_back(idx);
+                }         
             }
 
             // STEP 3 PROBE PHASE: WE TAKE THE ROWS OF THE RIGHT TABLE, CALCULATE
@@ -132,104 +118,90 @@ struct JoinAlgorithm {
 
             // for each row of the right table
             for (auto& right_record: right) {
-                std::visit(
-                    [&](const auto& key) {
-                        using Tk = std::decay_t<decltype(key)>;
-                        if constexpr (std::is_same_v<Tk, T>) {
 
-                            // for every matching key, find all matching build-side rows
-                            // combine columns from both tables into a new_record and 
-                            // add it to the final results
+                int32_t key = right_record[right_col].get_int();
+                
+                // for every matching key, find all matching build-side rows
+                // combine columns from both tables into a new_record and 
+                // add it to the final results
 
-                            // search for the key in the hash table
-                            if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                // search for the key in the hash table
+                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
 
-                                // for each matching left row index from
-                                // itr->second: the vector with row indices
-                                for (auto left_idx: itr->second) {
-                                    auto&             left_record = left[left_idx]; //get the whole left row
-                                    std::vector<Data> new_record;
-                                    new_record.reserve(output_attrs.size());
+                    // for each matching left row index from
+                    // itr->second: the vector with row indices
+                    for (auto left_idx: itr->second) {
+                        auto&             left_record = left[left_idx]; //get the whole left row
+                        std::vector<value_t> new_record;
+                        new_record.reserve(output_attrs.size());
 
-                                    // STEP 4 COMBINE RECORDS
+                        // STEP 4 COMBINE RECORDS
 
-                                    //left_record  = [1, "Alice", 25]        // 3 columns (indices 0, 1, 2)
-                                    //right_record = [100, "Order1"]         // 2 columns (indices 0, 1)
+                        //left_record  = [1, "Alice", 25]        // 3 columns (indices 0, 1, 2)
+                        //right_record = [100, "Order1"]         // 2 columns (indices 0, 1)
 
-                                    // Virtual combined record: [1, "Alice", 25, 100, "Order1"]
-                                    // Indices:                   0    1      2   3      4
+                        // Virtual combined record: [1, "Alice", 25, 100, "Order1"]
+                        // Indices:                   0    1      2   3      4
 
+                        // for each column index 
+                        for (auto [col_idx, _]: output_attrs) {
 
-                                    // for each column index 
-                                    for (auto [col_idx, _]: output_attrs) {
-
-                                        // if index < number of columns (wanted column is on left table)
-                                        if (col_idx < left_record.size()) {
-                                            new_record.emplace_back(left_record[col_idx]);
-                                        } 
-                                        // wanted column is on right table
-                                        else {
-                                            new_record.emplace_back(
-                                                right_record[col_idx - left_record.size()]);
-                                        }
-                                    }
-
-                                    // add the combined row to final result
-                                    results.emplace_back(std::move(new_record));
-                                }
+                            // if index < number of columns (wanted column is on left table)
+                            if (col_idx < left_record.size()) {
+                                new_record.emplace_back(left_record[col_idx]);
+                            } 
+                            // wanted column is on right table
+                            else {
+                                new_record.emplace_back(
+                                    right_record[col_idx - left_record.size()]);
                             }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
                         }
-                    },
-                    right_record[right_col]);
+
+                        // add the combined row to final result
+                        results.emplace_back(std::move(new_record));
+                    }
+                }
             }
 
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
         } else {
             for (auto&& [idx, record]: right | views::enumerate) {
-                std::visit(
-                    [&hash_table, idx = idx](const auto& key) {
-                        using Tk = std::decay_t<decltype(key)>;
-                        if constexpr (std::is_same_v<Tk, T>) {
-                            if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                hash_table.emplace(key, std::vector<size_t>(1, idx));
-                            } else {
-                                itr->second.push_back(idx);
-                            }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
-                        }
-                    },
-                    record[right_col]);
+
+                int32_t key = record[right_col].get_int();
+              
+                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+                } 
+                else {
+                    itr->second.push_back(idx);
+                }
             }
             for (auto& left_record: left) {
-                std::visit(
-                    [&](const auto& key) {
-                        using Tk = std::decay_t<decltype(key)>;
-                        if constexpr (std::is_same_v<Tk, T>) {
-                            if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-                                for (auto right_idx: itr->second) {
-                                    auto&             right_record = right[right_idx];
-                                    std::vector<Data> new_record;
-                                    new_record.reserve(output_attrs.size());
-                                    for (auto [col_idx, _]: output_attrs) {
-                                        if (col_idx < left_record.size()) {
-                                            new_record.emplace_back(left_record[col_idx]);
-                                        } else {
-                                            new_record.emplace_back(
-                                                right_record[col_idx - left_record.size()]);
-                                        }
-                                    }
-                                    results.emplace_back(std::move(new_record));
-                                }
+                
+                int32_t key = left_record[left_col].get_int();
+
+                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                   
+                    for (auto right_idx: itr->second) {
+                   
+                        auto&             right_record = right[right_idx];
+                        std::vector<value_t> new_record;
+                        new_record.reserve(output_attrs.size());
+                   
+                        for (auto [col_idx, _]: output_attrs) {
+                   
+                            if (col_idx < left_record.size()) {
+                                new_record.emplace_back(left_record[col_idx]);
+                            } 
+                            else {
+                                new_record.emplace_back(right_record[col_idx - left_record.size()]);
                             }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
                         }
-                    },
-                    left_record[left_col]);
+                        results.emplace_back(std::move(new_record));
+                    }
+                }
+                
             }
         }
     }
@@ -248,7 +220,7 @@ ExecuteResult execute_hash_join(const Plan&          plan,
     auto                           left        = execute_impl(plan, left_idx); // recursiving computing of table
     auto                           right       = execute_impl(plan, right_idx);
     
-    std::vector<std::vector<Data>> results; // for the joined rows
+    std::vector<std::vector<value_t>> results; // for the joined rows
 
     JoinAlgorithm join_algorithm{.build_left = join.build_left,
         .left                                = left,
@@ -346,34 +318,34 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                         
                         // LONG string page (first page of string)
                         if (num_rows == 0xffff) {
-                            auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
-                            auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
+                            // auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
+                            // auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
                           
-                            std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
+                            // std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
         
-                            if (row_idx >= table.numA_rows) {
-                                throw std::runtime_error("row_idx");
-                            }
+                            // if (row_idx >= table.numA_rows) {
+                            //     throw std::runtime_error("row_idx");
+                            // }
         
-                            results[row_idx++][column_idx].emplace<std::string>(std::move(value));
+                            // results[row_idx++][column_idx].emplace<std::string>(std::move(value));
         
                         } 
                         // LONG string (following page)
                         else if (num_rows == 0xfffe) {
-                            auto  num_chars  = *reinterpret_cast<uint16_t*>(page + 2);
-                            auto* data_begin = reinterpret_cast<char*>(page + 4);
+                            // auto  num_chars  = *reinterpret_cast<uint16_t*>(page + 2);
+                            // auto* data_begin = reinterpret_cast<char*>(page + 4);
         
-                            std::visit(
-                                [data_begin, num_chars](auto& value) {
-                                    using T = std::decay_t<decltype(value)>;
-                                    if constexpr (std::is_same_v<T, std::string>) {
-                                        value.insert(value.end(), data_begin, data_begin + num_chars);
-                                    } else {
-                                        throw std::runtime_error(
-                                            "long string page 0xfffe must follows a string");
-                                    }
-                                },
-                                results[row_idx - 1][column_idx]);
+                            // std::visit(
+                            //     [data_begin, num_chars](auto& value) {
+                            //         using T = std::decay_t<decltype(value)>;
+                            //         if constexpr (std::is_same_v<T, std::string>) {
+                            //             value.insert(value.end(), data_begin, data_begin + num_chars);
+                            //         } else {
+                            //             throw std::runtime_error(
+                            //                 "long string page 0xfffe must follows a string");
+                            //         }
+                            //     },
+                            //     results[row_idx - 1][column_idx]);
                         } 
                         
                         // REGULAR string page
@@ -400,8 +372,8 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                    
                                     auto        offset = offset_begin[data_idx++]; // get offset of string
 
-                                    // construct new string by copying bytes in range
-                                    std::string value{string_begin, data_begin + offset};
+                                    // // construct new string by copying bytes in range
+                                    // std::string value{string_begin, data_begin + offset};
                                     
 
 
@@ -458,6 +430,75 @@ ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
         node.data);
 }
 
+// converts a value_t to Data type
+Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
+   
+    if (v.is_null()) {
+        return std::monostate{};
+    }
+
+    if (v.is_int()) {
+        return v.get_int();
+    }
+
+    if (v.is_string()) {
+        // Materialize the string from the page
+        uint16_t table_idx = v.tableIdx;
+        uint16_t col_idx = v.columnIdx;
+        uint16_t page_idx = v.pageIdx;
+        uint16_t offset = v.offset & value_t::OFFSET_MASK;
+        
+        // Access the page and extract the string
+        auto& column = table.columns[col_idx];
+        auto* page = column.pages[page_idx]->data;
+
+        auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2);
+        
+        // data_begin points to the start of string data
+        auto* data_begin   = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
+
+        // return the string by copying bytes from data_begin up to offset
+        return std::string(data_begin, data_begin + offset);
+        
+    }
+    throw std::runtime_error("Unknown value_t type");
+}
+
+// Convert ExecuteResult (value_t) to Table format (Data)
+std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, const Plan& plan) {
+    
+    std::vector<std::vector<Data>> data_results; // final result in Data format
+    data_results.reserve(results.size());
+    
+    for (const auto& row : results) {
+        
+        std::vector<Data> data_row;
+        data_row.reserve(row.size());
+        
+        for (const auto& val : row) {
+         
+            if (val.is_null()) {
+                data_row.emplace_back(std::monostate{});
+            } 
+            else if (val.is_int()) {
+                data_row.emplace_back(val.get_int());
+            } 
+            else {
+                // String materialization from value_t
+                uint16_t table_idx = val.tableIdx;
+                auto& table = plan.inputs[table_idx];
+                Data data_value = valuet_to_Data(val, table); // convert value_t to Data
+                data_row.emplace_back(std::move(data_value));
+            }
+        }
+        
+        data_results.emplace_back(std::move(data_row));
+    }
+    
+    return data_results;
+}
+
+
 ColumnarTable execute(const Plan& plan, [[maybe_unused]] void* context) {
     namespace views = ranges::views;
     auto ret        = execute_impl(plan, plan.root); // row-based table
@@ -471,8 +512,11 @@ ColumnarTable execute(const Plan& plan, [[maybe_unused]] void* context) {
                    // converts the result to a vector<DataType> containing
                    // just the types of the output vectors
                    | ranges::to<std::vector<DataType>>();
+
+                   // convert ExecuteResult (value_t) to Table format (Data)
+                   auto data_table = convert_to_Data(ret, plan);
     
-                   Table table{std::move(ret), std::move(ret_types)};
+                   Table table{std::move(data_table), std::move(ret_types)};
 
     return table.to_columnar();
 }
