@@ -319,15 +319,16 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                         
                         // LONG string page (first page of string)
                         if (num_rows == 0xffff) {
-                            // auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
-                            // auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
+                            auto        num_chars  = *reinterpret_cast<uint16_t*>(page + 2); // next 2 bytes: number of characters
+                            auto*       data_begin = reinterpret_cast<char*>(page + 4); // actual data at page + 4
                           
                             // std::string value{data_begin, data_begin + num_chars}; // copy num_chars bytes pointed by data_begin
         
-                            // if (row_idx >= table.numA_rows) {
-                            //     throw std::runtime_error("row_idx");
-                            // }
-        
+                            if (row_idx >= table.num_rows) {
+                                throw std::runtime_error("row_idx");
+                            }
+                            
+
                             // results[row_idx++][column_idx].emplace<std::string>(std::move(value));
         
                         } 
@@ -351,18 +352,9 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                         
                         // REGULAR string page
                         else {
-                            auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2); // num of non null strings
-                            
-                            // array of offsets of strings, each offset is 2 bytes
-                            auto* offset_begin = reinterpret_cast<uint16_t*>(page + 4); 
-
-                            // actual string data starts after offsets
-                            auto* data_begin   = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
-                            auto* string_begin = data_begin;
-                            
+                                              
                             auto* bitmap =
-                                reinterpret_cast<uint8_t*>(page + PAGE_SIZE - (num_rows + 7) / 8);
-                            
+                                reinterpret_cast<uint8_t*>(page + PAGE_SIZE - (num_rows + 7) / 8);          
                             
                             uint16_t data_idx = 0;
                 
@@ -370,13 +362,7 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                 
                                 // if the i-th row is not null
                                 if (get_bitmap(bitmap, i)) {
-                                   
-                                    auto        offset = offset_begin[data_idx]; // get offset of string
-
-
-                                    // update string_begin to point to end of current string
-                                    string_begin = data_begin + offset;
-                
+                                                  
                                     if (row_idx >= table.num_rows) {
                                         throw std::runtime_error("row_idx");
                                     }
