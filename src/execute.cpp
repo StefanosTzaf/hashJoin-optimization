@@ -21,7 +21,7 @@ struct value_t {
     static constexpr uint16_t OFFSET_MASK = 0x1FFF; // 0001 1111 1111 1111
 
     // constructor
-    value_t() : tableIdx(NULL_TAG), columnIdx(0), pageIdx(0), dataIdx(NULL_TAG) {}
+    value_t() : tableIdx(NULL_TAG), columnIdx(NULL_TAG), pageIdx(NULL_TAG), dataIdx(NULL_TAG) {}
 
     // create a value_t representing an integer
     static value_t from_int(int32_t val) {
@@ -76,13 +76,13 @@ namespace Contest {
 
 // similar to typedef: write ExecuteResult instead of std::vector<std::vector<Data>>
 // this is row-based
-// Data is std::variant<int32_t, int64_t, double, std::string, std::monostate>
-// and holds one value of any of these types
 using ExecuteResult = std::vector<std::vector<value_t>>;
 
 // recursively computes the result of the plan node with index node_idx
 // depending on its type: ScanNode or JoinNode
 ExecuteResult execute_impl(const Plan& plan, size_t node_idx);
+
+Data valuet_to_Data(const value_t& val, const ColumnarTable& table);
 
 struct JoinAlgorithm {
     bool                                             build_left; // if true: build with left table, probe with right
@@ -101,9 +101,8 @@ struct JoinAlgorithm {
         // one key might correspond to multiple rows
         std::unordered_map<int32_t, std::vector<size_t>> hash_table;
 
-         // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
-        // CALCULATE THE HASH VALUE OF EACH KEY AND STORE IT IN THE HASH TABLE
-        // if we build on the left table
+         // STEP 2 BUILD PHASE: take rows of left table, calculate hash value
+         // and store in hash table
         if (build_left) {
 
             // iterates over all rows of left table with row index idx
@@ -112,7 +111,6 @@ struct JoinAlgorithm {
 
                 int32_t key = record[left_col].get_int();
 
-                // try to find the key in the hash table
                 if (auto itr = hash_table.find(key); itr == hash_table.end()) {
                     // append idx to the appropriate vector of the hash table
                     hash_table.emplace(key, std::vector<size_t>(1, idx));
@@ -123,9 +121,8 @@ struct JoinAlgorithm {
                 }         
             }
 
-            // STEP 3 PROBE PHASE: WE TAKE THE ROWS OF THE RIGHT TABLE, CALCULATE
-            // THE HASH VALUE OF EACH KEY AND CHECK IF IT ALREADY EXISTS
-            // IF SO, WE STORE IT IN THE FINAL TABLE, SINCE IT IS A RESULT OF JOIN
+            // STEP 3 PROBE PHASE: take rows of right table, calculate hash value
+            // and if it exists store it in temp_results (vector of columns)
 
             // for each row of the right table
             for (auto& right_record: right) {
@@ -134,15 +131,14 @@ struct JoinAlgorithm {
                 
                 // for every matching key, find all matching build-side rows
                 // combine columns from both tables into a new_record and 
-                // add it to the final results
+                // add it to the temp_results
 
-                // search for the key in the hash table
                 if (auto itr = hash_table.find(key); itr != hash_table.end()) {
 
                     // for each matching left row index from
                     // itr->second: the vector with row indices
                     for (auto left_idx: itr->second) {
-                        auto&             left_record = left[left_idx]; //get the whole left row
+                        auto&             left_record = left[left_idx]; 
                         std::vector<value_t> new_record;
                         new_record.reserve(output_attrs.size());
 
@@ -154,7 +150,7 @@ struct JoinAlgorithm {
                         // Virtual combined record: [1, "Alice", 25, 100, "Order1"]
                         // Indices:                   0    1      2   3      4
 
-                        // for each column index 
+                        // for each column index we want in the final result
                         for (auto [col_idx, _]: output_attrs) {
 
                             // if index < number of columns (wanted column is on left table)
@@ -216,6 +212,177 @@ struct JoinAlgorithm {
             }
         }
     }
+
+};
+
+struct RootJoinAlgorithm{
+    bool                                             build_left; // if true: build with left table, probe with right
+    ExecuteResult&                                   left; // rows of left table
+    ExecuteResult&                                   right; // rows of right table
+    ColumnarTable&                                   results; // rows of join result
+    size_t                                           left_col, right_col; // indexes of join keys for each table
+    const std::vector<std::tuple<size_t, DataType>>& output_attrs; // (column index, type)
+    const Plan&                                          plan;
+
+    template <class T>
+    auto run(){
+        namespace views = ranges::views;
+
+        std::unordered_map<int32_t, std::vector<size_t>> hash_table;
+
+        auto numOfColumns = output_attrs.size(); // number of columns in final result
+        std::vector<std::vector<value_t>> temp_results; // temporary storage for each column of final result
+        temp_results.resize(numOfColumns);
+        
+        // BUILD PHASE
+        if (build_left) {
+
+            for (auto&& [idx, record]: left | views::enumerate) {                        
+
+                int32_t key = record[left_col].get_int();
+      
+                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+           
+                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+
+                // if not found, create new entry in hash table with idx
+                } else {
+                    itr->second.push_back(idx);
+                }         
+            }
+
+            // PROBE PHASE
+            for (auto& right_record: right) {
+
+                int32_t key = right_record[right_col].get_int();
+                
+                // for every matching key, find all matching build-side rows
+                // combine columns from both tables and store each column in temp_results
+                if (auto itr = hash_table.find(key); itr != hash_table.end()) {                   
+
+                    for (auto left_idx: itr->second) {
+                        auto&             left_record = left[left_idx]; 
+
+                        // combine records
+                        // we should now create columns instead of rows
+
+                        size_t output_col = 0; // index for column of temp_results
+                        // for each (column index, type) of desired output
+                        for (auto [col_idx, data_type]: output_attrs) {
+
+                            // wanted column is on left table
+                            if (col_idx < left_record.size()) {
+                                // store the col_idx-th value of the row
+                                temp_results[output_col].emplace_back(left_record[col_idx]);
+                            } 
+                            // wanted column is on right table
+                            else {
+                                temp_results[output_col].emplace_back(
+                                    right_record[col_idx - left_record.size()]);
+                            }
+                            output_col++;
+                        }
+                    }
+                }
+            }
+
+        // STEP 5: BUILD ON RIGHT TABLE
+        // PROBE WITH LEFT TABLE, COMBINE MATCHES
+        } else {
+            for (auto&& [idx, record]: right | views::enumerate) {
+
+                int32_t key = record[right_col].get_int();
+              
+                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                    hash_table.emplace(key, std::vector<size_t>(1, idx));
+                } 
+                else {
+                    itr->second.push_back(idx);
+                }
+            }
+
+            for (auto& left_record: left) {
+                
+                int32_t key = left_record[left_col].get_int();
+
+                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                   
+                    for (auto right_idx: itr->second) {
+                   
+                        auto&             right_record = right[right_idx];
+                   
+                        size_t output_col = 0;
+                        for (auto [col_idx, _]: output_attrs) {
+                   
+                            if (col_idx < left_record.size()) {
+                                temp_results[output_col].emplace_back(left_record[col_idx]);
+                            } 
+                            else {
+                                temp_results[output_col].emplace_back(right_record[col_idx - left_record.size()]);
+                            }
+                            output_col++;
+                        }
+                    }
+                }
+                
+            }
+        }
+
+        // now that we have all columns in temp_results
+        // we need to fill the ColumnarTable with the materialized columns
+        size_t output_col = 0;
+        for (auto [col_idx, data_type]: output_attrs) {
+            
+            results.columns.emplace_back(data_type); // add new column to table
+            auto& column = results.columns.back();
+
+            // check data type of column
+
+            if(data_type == DataType::INT32){
+                ColumnInserter<int32_t> inserter(column);
+
+                // iterate through all values of the column
+                for(auto& val: temp_results[output_col]){
+                    if(val.is_int()){
+                        inserter.insert(val.get_int()); // simple insertion
+                    }
+                    else{
+                        inserter.insert_null();
+                    }
+                }
+                inserter.finalize();
+            }
+            else if(data_type == DataType::VARCHAR){
+                ColumnInserter<std::string> inserter(column);
+
+                for(auto& val: temp_results[output_col]){
+                    if(val.is_null()){
+                        inserter.insert_null();
+                    }
+                    else{
+                        // materialization of string
+                        const ColumnarTable& table = plan.inputs[val.tableIdx];
+                        Data data_str = valuet_to_Data(val, table);
+                        std::string str = std::get<std::string>(data_str);
+                        inserter.insert(str);
+
+                    }
+                }
+                inserter.finalize();
+            }
+            output_col++;
+        }
+        
+        // Set the number of rows in the result
+        if (temp_results.empty() == false) {
+            results.num_rows = temp_results[0].size();
+        } 
+        else {
+            results.num_rows = 0;
+        }
+    
+    }
+
 };
 
 ExecuteResult execute_hash_join(const Plan&          plan,
@@ -231,7 +398,8 @@ ExecuteResult execute_hash_join(const Plan&          plan,
     auto                           left        = execute_impl(plan, left_idx); // recursiving computing of table
     auto                           right       = execute_impl(plan, right_idx);
     
-    std::vector<std::vector<value_t>> results; // for the joined rows
+  
+    std::vector<std::vector<value_t>> results; // for the joined rows   
 
     JoinAlgorithm join_algorithm{.build_left = join.build_left,
         .left                                = left,
@@ -240,9 +408,38 @@ ExecuteResult execute_hash_join(const Plan&          plan,
         .left_col                            = join.left_attr,
         .right_col                           = join.right_attr,
         .output_attrs                        = output_attrs};
+
     
     // join key is always int32_t, so no need to check its type
     join_algorithm.run<int32_t>();
+      
+
+    // this is filled by the run<T> method
+    return results;
+}
+
+ColumnarTable execute_root_hash_join(
+    const Plan&                                      plan,
+    const JoinNode&                                  join,
+    ExecuteResult&                                   left,
+    ExecuteResult&                                   right, 
+    const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
+  
+    ColumnarTable results; // result of final join 
+
+    RootJoinAlgorithm root_join_algorithm{
+        .build_left                          = join.build_left,
+        .left                                = left,
+        .right                               = right,
+        .results                             = results,
+        .left_col                            = join.left_attr,
+        .right_col                           = join.right_attr,
+        .output_attrs                        = output_attrs,
+        .plan                                = plan};
+
+    
+    // join key is always int32_t, so no need to check its type
+    root_join_algorithm.run<int32_t>();
       
 
     // this is filled by the run<T> method
@@ -402,9 +599,12 @@ ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
     return std::visit( // visit: to determine node type : scan or join node
         [&](const auto& value) {
             using T = std::decay_t<decltype(value)>;
+
             if constexpr (std::is_same_v<T, JoinNode>) {
+
                 return execute_hash_join(plan, value, node.output_attrs);
-            } else {
+            } 
+            else {
                 return execute_scan(plan, value, node.output_attrs);
             }
         },
@@ -515,24 +715,35 @@ std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, con
 
 ColumnarTable execute(const Plan& plan, [[maybe_unused]] void* context) {
     namespace views = ranges::views;
-    auto ret        = execute_impl(plan, plan.root); // row-based table
-    
-    // output_attrs: vector of tuples of (column index, data type)
-    auto ret_types  = plan.nodes[plan.root].output_attrs
-                   
-                    // extracts only the data types
-                   | views::transform([](const auto& v) { return std::get<1>(v); })
-                   
-                   // converts the result to a vector<DataType> containing
-                   // just the types of the output vectors
-                   | ranges::to<std::vector<DataType>>();
+    auto& root_node = plan.nodes[plan.root];
 
-                   // convert ExecuteResult (value_t) to Table format (Data)
-                   auto data_table = convert_to_Data(ret, plan);
-    
-                   Table table{std::move(data_table), std::move(ret_types)};
+    return std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
 
-    return table.to_columnar();
+            if constexpr (std::is_same_v<T, JoinNode>) {
+                // Get left and right children as ExecuteResult
+                auto left = execute_impl(plan, value.left);
+                auto right = execute_impl(plan, value.right);
+                
+                // Join directly to columnar
+                return execute_root_hash_join(plan, value, left, right, root_node.output_attrs);
+            } 
+            else {
+                // Root is just a scan 
+                auto ret = execute_impl(plan, plan.root);
+                auto ret_types = plan.nodes[plan.root].output_attrs
+                               | views::transform([](const auto& v) { return std::get<1>(v); })
+                               | ranges::to<std::vector<DataType>>();
+                               
+                auto data_table = convert_to_Data(ret, plan);
+                
+                Table table{std::move(data_table), std::move(ret_types)};
+                
+                return table.to_columnar();
+            }
+        },
+        root_node.data);
 }
 
 void* build_context() {
