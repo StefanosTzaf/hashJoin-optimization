@@ -1,4 +1,5 @@
 #include <LateMaterialization.h>
+#include <iostream>
 
 
 static bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
@@ -26,11 +27,17 @@ struct RootJoinAlgorithm{
         auto numOfColumns = output_attrs.size(); // number of columns in final result
         std::vector<std::vector<value_t>> temp_results; // temporary storage for each column of final result
         temp_results.resize(numOfColumns);
+
+        size_t num_rows = 0; // number of rows in the final result
         
         // BUILD PHASE
         if (build_left) {
 
-            for (auto&& [idx, record]: left | views::enumerate) {                        
+            for (auto&& [idx, record]: left | views::enumerate) {   
+                
+                if(record[left_col].is_null()){
+                    continue;
+                }
 
                 int32_t key = record[left_col].get_int();
       
@@ -47,6 +54,10 @@ struct RootJoinAlgorithm{
             // PROBE PHASE
             for (auto& right_record: right) {
 
+                if(right_record[right_col].is_null()){
+                    continue;
+                }
+
                 int32_t key = right_record[right_col].get_int();
                 
                 // for every matching key, find all matching build-side rows
@@ -54,7 +65,7 @@ struct RootJoinAlgorithm{
                 if (auto itr = hash_table.find(key); itr != hash_table.end()) {                   
 
                     for (auto left_idx: itr->second) {
-                        auto&             left_record = left[left_idx]; 
+                        auto&             left_record = left[left_idx];         
 
                         // combine records
                         // we should now create columns instead of rows
@@ -84,6 +95,10 @@ struct RootJoinAlgorithm{
         } else {
             for (auto&& [idx, record]: right | views::enumerate) {
 
+                if(record[right_col].is_null()){
+                    continue;
+                }
+
                 int32_t key = record[right_col].get_int();
               
                 if (auto itr = hash_table.find(key); itr == hash_table.end()) {
@@ -95,6 +110,10 @@ struct RootJoinAlgorithm{
             }
 
             for (auto& left_record: left) {
+
+                if(left_record[left_col].is_null()){
+                    continue;
+                }
                 
                 int32_t key = left_record[left_col].get_int();
 
@@ -103,7 +122,7 @@ struct RootJoinAlgorithm{
                     for (auto right_idx: itr->second) {
                    
                         auto&             right_record = right[right_idx];
-                   
+
                         size_t output_col = 0;
                         for (auto [col_idx, _]: output_attrs) {
                    
@@ -124,6 +143,7 @@ struct RootJoinAlgorithm{
         // now that we have all columns in temp_results
         // we need to fill the ColumnarTable with the materialized columns
         size_t output_col = 0;
+
         for (auto [col_idx, data_type]: output_attrs) {
             
             results.columns.emplace_back(data_type); // add new column to table
@@ -134,10 +154,13 @@ struct RootJoinAlgorithm{
             if(data_type == DataType::INT32){
                 ColumnInserter<int32_t> inserter(column);
 
+                size_t num_of_null_values = 0;
+
                 // iterate through all values of the column
                 for(auto& val: temp_results[output_col]){
                     if(val.is_int()){
                         inserter.insert(val.get_int()); // simple insertion
+
                     }
                     else{
                         inserter.insert_null();
@@ -165,14 +188,12 @@ struct RootJoinAlgorithm{
             }
             output_col++;
         }
-        
+
+        int total_rows = temp_results[0].size(); // without nulls
+
         // Set the number of rows in the result
-        if (temp_results.empty() == false) {
-            results.num_rows = temp_results[0].size();
-        } 
-        else {
-            results.num_rows = 0;
-        }
+        results.num_rows = total_rows;     
+        
     
     }
 
