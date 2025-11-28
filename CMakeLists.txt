@@ -71,12 +71,15 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc|powerpc|ppc64|ppc64le")
 endif()
 FetchContent_MakeAvailable(duckdb)
 
-# Include all sources from /src directory. CONFIGURE_DEPENDS can be unreliable.
-# Try re-running cmake in case changes are not recognized.
-file(GLOB SIGMODPC_SRC
-    CONFIGURE_DEPENDS
-    "src/*.cpp"
+# Explicitly list sources to avoid pulling both engine variants into the same target.
+set(COMMON_SOURCES
+    src/build_table.cpp
+    src/csv_parser.cpp
+    src/statement.cpp
+    src/LateMaterialization.cpp
 )
+
+set(BASE_ENGINE src/execute.cpp)
 
 # Enable server-specific compiler optimizations.
 # Use march=native for all but Power servers, which results in the following error:
@@ -87,8 +90,12 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc|powerpc|ppc64|ppc64le")
 endif()
 
 # Targets
-add_executable(run ${SIGMODPC_SRC} tests/read_sql.cpp)
-add_executable(unit_tests ${SIGMODPC_SRC} tests/unit_tests.cpp)
+# Default run uses the base engine implementation
+add_executable(run ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+
+# Unit tests - main test suite
+add_executable(unit_tests ${COMMON_SOURCES} ${BASE_ENGINE} tests/unit_tests.cpp)
+
 add_executable(build_database tests/build_database.cpp)
 
 # For all executables
@@ -99,8 +106,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 endif()
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    add_executable(build_cache ${SIGMODPC_SRC} tests/read_sql.cpp)
-    add_executable(fast ${SIGMODPC_SRC} tests/read_sql.cpp)
+    # Exclude fast targets from default 'all' build; build via explicit target 'fast'
+    add_executable(build_cache EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+
+    add_executable(fast EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+
+
+    # Ensure 'cmake --build ... fast' builds all fast executables including all unit tests
+    add_dependencies(fast unit_tests)
 
     target_link_libraries(build_cache PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
     target_compile_definitions(build_cache PRIVATE TEAMOPT_USE_DUCKDB TEAMOPT_BUILD_CACHE)
