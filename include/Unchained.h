@@ -1,11 +1,14 @@
 #include <cstdint>
 #include <vector>
 #include <cstring>
-
+#include <random>
+#include <array>
 
 // every entry in the directory contains a bloom filter and a pointer
 struct DirectoryEntry {
     uint64_t data;
+    // as reffered in the paper, save all possible cobination so as to speed up probe
+    static std::array<uint16_t, 2048> bloom_lookup;
     
 
     DirectoryEntry() : data(0){
@@ -36,6 +39,8 @@ struct DirectoryEntry {
 
     inline void bloomAdd(uint32_t hash) {
         uint16_t bloom = getBloomFilter();
+        // gets 11 bits from hash becaueuase we have 2048 entries
+        // sets the bits in the bloom filter
         bloom |= bloom_lookup[bloomTag(hash)];
         setBloomFilter(bloom);
     }
@@ -47,6 +52,7 @@ struct DirectoryEntry {
         masks.reserve(1820);
 
         // first 1820 4-bit patterns (C(16,4)) will be the real masks 
+        // all combinations have 4 bits set as paper says
         for (int a = 0; a < 16; a++)
             for (int b = a + 1; b < 16; b++)
                 for (int c = b + 1; c < 16; c++)
@@ -58,6 +64,7 @@ struct DirectoryEntry {
             bloom_lookup[i] = masks[i];
 
         // pad the rest to 2048 with random BUT with seed so as to be deterministic
+        // those entries do not have exactly 4 bits set but it's ok for our purpose
         std::mt19937_64 rng(1234567);
         for (size_t i = masks.size(); i < 2048; i++)
             bloom_lookup[i] = (uint16_t)(rng() & 0xFFFF);
@@ -75,28 +82,49 @@ struct Tuple {
     Tuple(int32_t k, size_t r) : key(k), row_ids(r) {}
 };
 
-/**
- * Unchained Hash Table
- * Υλοποίηση του hashtable χωρίς αλυσίδες βάσει του paper.
- */
+
+
 class UnchainedHashTable {
 private:
-    // as reffered in the paper, save all possible cobination so as to speed up probe
-    static std::array<uint16_t, 2048> bloom_lookup;
+    
 
     // directory entries
     std::vector<DirectoryEntry> directory;
+    // how many entries in the directory
+    std::vector<size_t> dir_sizes;
     
     // Tuple storage: sorteda by key (TODO do we need Pagenated?)
     std::vector<Tuple> tuple_buffer;
     
-    // how many entries in the directory
-    size_t directory_size;
-    
-    // Number of bits for the hash prefix (for indexing into the directory)
-    uint32_t prefix_bits;
+    // how many bits will be used (from hash function output) for the directory indexing
+    // for 16 bits we will have 2^16 directory entries , Hardcoded so as to be able to be changed to find the bestvalue
+    static constexpr uint32_t PREFIX_BITS = 16;
+
+    uint32_t crc32(uint32_t data) {
+        uint32_t crc = 0xFFFFFFFF;
+        // for each byte
+        for (int i = 0; i < 4; i++) {
+            uint8_t byte = (data >> (i*8)) & 0xFF;
+            crc ^= byte;
+            for (int j = 0; j < 8; j++) {
+                if (crc & 1)
+                    crc = (crc >> 1) ^ 0xEDB88320;
+                else
+                    crc = crc >> 1;
+            }
+        }
+        return crc ^ 0xFFFFFFFF;
+    }
 
     
-public:
-
+    
+    
+    public:
+        UnchainedHashTable(){
+            // compute one time the bloom lookup table
+            DirectoryEntry::initBloomLookup();
+            directory.resize(1 << PREFIX_BITS);
+            dir_sizes.resize(1 << PREFIX_BITS, 0);
+            tuple_buffer.reserve(100000);
+        }
 };

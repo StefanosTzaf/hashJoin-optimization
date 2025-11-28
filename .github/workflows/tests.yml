@@ -2,28 +2,25 @@ name: Run Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: 
+      - "UnchainedHash"
   pull_request:
     branches: [ "main" ]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: k23a
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake build-essential
-    
+        
     - name: Configure CMake
       run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
     
     - name: Build
       run: cmake --build build -- -j $(nproc) fast
     
-    - name: Run All Tests
-      run: ./tests.sh
+    - name: unit_tests
+      run: ./build/unit_test_Unchained
