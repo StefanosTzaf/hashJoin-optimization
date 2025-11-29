@@ -42,6 +42,14 @@ bool ColumnTInserter::isFull(Page* page){
 }
 
 void ColumnTInserter::insert(value_t& val){
+
+    if((column.type == DataType::INT32) && (val.is_string() == true)){
+        throw std::runtime_error("Cannot insert string into INT32 column");
+    }
+
+    if((column.type == DataType::VARCHAR) && (val.is_int() == true)){
+        throw std::runtime_error("Cannot insert INT32 into VARCHAR column");
+    }
     
     // check if we need to create first page
     if(column.pages.size() == 0){

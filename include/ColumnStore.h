@@ -36,6 +36,10 @@ class ColumnT{
             return pages.size();
         } 
 
+        Page* getPage(size_t idx) const{
+            return pages[idx];
+        }
+
 
 
         // destructor
@@ -76,12 +80,14 @@ class ColumnTInserter{
         void insert(value_t& val);
 
         // GETTERS
-        const int getLastPage() const{
+        const int getLastPageIdx() const{
             return lastPageIdx;
         }
 
         const ColumnT& getColumn()const{
             return column;
         }
+
+
 
 };
