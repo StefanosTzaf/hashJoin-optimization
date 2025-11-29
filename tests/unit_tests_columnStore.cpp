@@ -36,6 +36,10 @@ TEST_CASE("Simple INT32 column", "[ColumnStore]"){
     REQUIRE(col.getNumPages() == 1);
     REQUIRE(col.getSize() == 4);
 
+    size_t dataStart = inserter.dataBegin(col.getPage(0));
+    REQUIRE(dataStart == sizeof(uint16_t) + 4*sizeof(value_t));
+    
+
 
 }
 
@@ -141,6 +145,44 @@ TEST_CASE("STRING column with multiple pages", "[ColumnStore]"){
 
     int numValuesSecondPage = *reinterpret_cast<uint16_t*>(secondPage->data);
     REQUIRE(numValuesSecondPage == 1);
+
+
+}
+
+
+TEST_CASE("Simple null insertion", "[ColumnStore]"){
+
+    ColumnT col(DataType::INT32);
+    ColumnTInserter inserter(col);
+
+    REQUIRE(col.getNumPages() == 0);
+    REQUIRE(inserter.getLastPageIdx() == 0);
+    REQUIRE(col.getType() == DataType::INT32);
+    REQUIRE(col.getSize() == 0);
+
+    value_t val1;
+    value_t val2;
+    value_t val3;
+    value_t val4;
+
+    val1 = value_t::from_int(0);
+    val2 = value_t::from_int(1);
+    // val3 is null
+    val4 = value_t::from_int(3);
+
+    inserter.insert(val1);
+    inserter.insert(val2);
+    inserter.insert(val3);
+    inserter.insert(val4);
+
+    REQUIRE(col.getNumPages() == 1);
+    REQUIRE(col.getSize() == 4);
+    
+    Page* page = col.getPage(0);
+    int numValues = *reinterpret_cast<uint16_t*>(page->data);
+    
+    value_t valCheck = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + 2*sizeof(value_t));;
+    REQUIRE(valCheck.is_null() == true);
 
 
 }
