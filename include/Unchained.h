@@ -3,7 +3,7 @@
 #include <cstring>
 #include <random>
 #include <array>
-
+#include <iostream>
 
 struct Tuple {
     int32_t key;
@@ -219,6 +219,42 @@ class UnchainedHashTable {
         }
 
 
-        std::vector<size_t> search(int32_t key) {
+std::vector<size_t> search(int32_t key) {
+    std::vector<size_t> results;
+    
+    // 1. Compute hash and get prefix (bucket)
+    uint32_t hash = crc32(key);
+    uint32_t bucket = hash >> (32 - PREFIX_BITS);
+    
+    // 2. Check if bucket is empty first
+    if (prefix_count[bucket] == 0) {
+        return results;
+    }
+    
+    // 3. Get directory entry
+    uint64_t entry = directory[bucket].data;
+    
+    // 4. Check Bloom filter
+    uint16_t bloom_tag = DirectoryEntry::bloomTag(hash);
+    uint16_t bloom_mask = DirectoryEntry::bloom_lookup[bloom_tag];
+    uint16_t entry_bloom = (uint16_t)(entry & 0xFFFF);
+    
+    if ((entry_bloom & bloom_mask) != bloom_mask) {
+        return results;
+    }
+    
+    // 5. Get range using offset (more reliable than pointer arithmetic)
+    Tuple* start = &tuple_buffer[prefix_offset[bucket]];
+    Tuple* end = start + prefix_count[bucket];
+    
+    
+    // 6. Linear scan [start, end)
+    for (Tuple* cur = start; cur != end; ++cur) {
+        if (cur->key == key) {
+            results.push_back(cur->row_ids);
         }
+    }
+    
+    return results;
+}
 };
