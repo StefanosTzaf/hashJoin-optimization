@@ -2,7 +2,8 @@
 #include <plan.h>
 #include <table.h>
 #include <inner_column.h>
-#include <LateMaterialization.h>
+#include "LateMaterialization.h"
+#include "ColumnStore.h"
 
 namespace Contest {
 

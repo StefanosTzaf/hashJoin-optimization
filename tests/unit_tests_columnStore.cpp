@@ -2,6 +2,7 @@
 #include <string>
 #include "ColumnStore.h"
 #include "LateMaterialization.h"
+#include "value_t.h"
 #include <vector>
 #include <catch2/catch_test_macros.hpp>
 

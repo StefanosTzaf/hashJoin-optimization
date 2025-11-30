@@ -10,7 +10,7 @@ Page* ColumnT::newPage(){
 }
 
 
-size_t ColumnTInserter::dataBegin(Page* page){
+size_t ColumnTInserter::dataBegin(Page* page) const {
 
     // first 2 bytes of the page are its number of values
     uint16_t num_of_values = *reinterpret_cast<uint16_t*>(page->data);
@@ -26,7 +26,7 @@ size_t ColumnTInserter::dataBegin(Page* page){
     }
 }
 
-bool ColumnTInserter::isFull(Page* page){
+bool ColumnTInserter::isFull(Page* page) const{
     
     size_t data = dataBegin(page);
 
@@ -41,7 +41,7 @@ bool ColumnTInserter::isFull(Page* page){
     }
 }
 
-void ColumnTInserter::insert(value_t& val){
+void ColumnTInserter::insert(const value_t& val){
 
     if((column.type == DataType::INT32) && (val.is_string() == true)){
         throw std::runtime_error("Cannot insert string into INT32 column");

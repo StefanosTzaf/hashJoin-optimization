@@ -3,9 +3,10 @@
 #include <plan.h>
 #include <table.h>
 #include <inner_column.h>
-#include "LateMaterialization.h"
 #include <iostream>
+#include "value_t.h"
 
+struct value_t;
 
 
 class ColumnT{
@@ -78,7 +79,7 @@ class ColumnT{
             return pages;
         }
 
-        const value_t* getValueAt(size_t idx) const{
+        value_t* getValueAt(size_t idx) const{
 
             size_t totalRows = 0; // total rows from all pages
 
@@ -98,7 +99,7 @@ class ColumnT{
                     // pos = 9 - 8 = 1
                     size_t pos = idx - rowsTillLastPage;
 
-                    value_t* val = reinterpret_cast<value_t*>(pages[i]->data + sizeof(numRows) + pos*sizeof(value_t));
+                    value_t* val = reinterpret_cast<value_t*>(pages[i]->data + sizeof(uint16_t) + pos*sizeof(value_t));
 
                     return val;
                 }
@@ -139,13 +140,13 @@ class ColumnTInserter{
         }
 
         // returns the position for the next insertion
-        size_t dataBegin(Page* page);
+        size_t dataBegin(Page* page) const;
 
         // returns true if the page is full
-        bool isFull(Page* page);
+        bool isFull(Page* page) const;
         
         // inserts a value_t in the last page or a new one if there is no space
-        void insert(value_t& val);
+        void insert(const value_t& val);
 
         // GETTERS
         const int getLastPageIdx() const{
