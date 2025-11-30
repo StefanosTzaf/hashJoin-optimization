@@ -7,10 +7,9 @@
 #include "value_t.h"
 
 
-// similar to typedef: write ExecuteResult instead of std::vector<ColumnT>
-// this is column-based
-using ExecuteResult = std::vector<ColumnT>;
-
+// similar to typedef: write ExecuteResult instead of std::vector<std::vector<Data>>
+// this is row-based
+using ExecuteResult = std::vector<std::vector<value_t>>;
 
 // Forward declarations
 struct RootJoinAlgorithm;
@@ -25,7 +24,7 @@ ColumnarTable execute_root_hash_join(
    
     
 
-ExecuteResult my_copy_scan(const ColumnarTable& table,
+std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
     const std::vector<std::tuple<size_t, DataType>>& output_attrs, uint16_t table_id);
 
     

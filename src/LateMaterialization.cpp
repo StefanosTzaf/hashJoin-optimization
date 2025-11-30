@@ -1,5 +1,6 @@
 #include <LateMaterialization.h>
 #include <iostream>
+#include "ColumnStore.h"
 
 
 static bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
