@@ -74,6 +74,40 @@ class ColumnT{
             return pages[idx];
         }
 
+        const std::vector<Page*>& getPages() const{
+            return pages;
+        }
+
+        const value_t* getValueAt(size_t idx) const{
+
+            size_t totalRows = 0; // total rows from all pages
+
+            for(size_t i = 0; i < pages.size(); i++){
+
+                uint16_t numRows = *reinterpret_cast<uint16_t*>(pages[i]->data);
+                totalRows += numRows;
+
+                // value is in this page
+                if(idx < totalRows){
+
+                    size_t rowsTillLastPage = totalRows - numRows; // how many rows do the previous page have in total
+                    
+                    // if we have three pages of 4 rows e.g and idx = 9
+                    // the value is located in the third page at pos 1
+                    // rowsTillLastPage = 12 - 4 = 8
+                    // pos = 9 - 8 = 1
+                    size_t pos = idx - rowsTillLastPage;
+
+                    value_t* val = reinterpret_cast<value_t*>(pages[i]->data + sizeof(numRows) + pos*sizeof(value_t));
+
+                    return val;
+                }
+               
+            }
+
+            return NULL;
+        }
+
 
 
         // destructor

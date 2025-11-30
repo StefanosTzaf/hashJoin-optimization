@@ -35,6 +35,10 @@ TEST_CASE("Simple INT32 column", "[ColumnStore]"){
 
     REQUIRE(col.getNumPages() == 1);
     REQUIRE(col.getSize() == 4);
+    REQUIRE(col.getValueAt(0)->get_int() == 1);
+    REQUIRE(col.getValueAt(1)->get_int() == 2);
+    REQUIRE(col.getValueAt(2)->get_int() == 3);
+    REQUIRE(col.getValueAt(3)->get_int() == 4);
 
     size_t dataStart = inserter.dataBegin(col.getPage(0));
     REQUIRE(dataStart == sizeof(uint16_t) + 4*sizeof(value_t));
@@ -73,9 +77,11 @@ TEST_CASE("INT32 column with multiple pages", "[ColumnStore]"){
 
     int numValuesFirstPage = *reinterpret_cast<uint16_t*>(firstPage->data);
     REQUIRE(numValuesFirstPage == maxValues);
+    REQUIRE(col.getValueAt(maxValues-2)->get_int() == (maxValues-2));
 
     int numValuesSecondPage = *reinterpret_cast<uint16_t*>(secondPage->data);
     REQUIRE(numValuesSecondPage == 1);
+    REQUIRE(col.getValueAt(maxValues - 1)->get_int() == (maxValues-1));
 
 }
 
