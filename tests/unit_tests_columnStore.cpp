@@ -186,3 +186,48 @@ TEST_CASE("Simple null insertion", "[ColumnStore]"){
 
 
 }
+
+TEST_CASE("Creation of ColumnT from Column", "[ColumnStore]"){
+
+    Column column(DataType::INT32);
+    ColumnInserter<int32_t> inserter(column);
+    
+    REQUIRE(column.pages.size() == 0);
+    
+    inserter.insert(10);
+    inserter.insert(20);
+    inserter.insert(30);
+    inserter.finalize();
+    REQUIRE(column.pages.size() == 1);
+
+    ColumnT col_t(std::move(column));
+    
+
+    REQUIRE(col_t.getType() == DataType::INT32);
+    REQUIRE(col_t.getNumPages() == 1);
+    REQUIRE(col_t.getSize() == 3);
+}
+
+TEST_CASE("Creation of columnT from Column with multiple pages", "[Columnstore]"){
+
+    Column column(DataType::INT32);
+    ColumnInserter<int32_t> inserter(column);
+
+    size_t maxValues = 2000;
+
+    for(size_t i = 0; i < maxValues; i++){
+        
+        inserter.insert(i);
+    }
+
+    inserter.finalize();
+
+    ColumnT col_t(std::move(column));
+
+    REQUIRE(col_t.getType() == DataType::INT32);
+    REQUIRE(col_t.getNumPages() > 1);
+    REQUIRE(col_t.getSize() == maxValues);
+
+
+
+}
