@@ -14,18 +14,17 @@ class ColumnT{
         DataType type; // type of column
         size_t size; // number of elements (+null)
         std::vector<Page*> pages;
+        std::vector<size_t> pageRowOffset; // a vector holding the number of offset rows till each page
 
     public:
         // constructor
-        ColumnT(DataType typeCol): type(typeCol), pages(), size(0){}; 
-
-        // efficient move of column: && rvalue
-        ColumnT(ColumnT&& col_t): type(col_t.type), pages(std::move(col_t.pages)){}
+        ColumnT(DataType typeCol): type(typeCol), pages(), size(0), pageRowOffset(){}; 
 
         // efficient move from Column NOT ColumnT
         ColumnT(Column&& col): type(col.type), pages(std::move(col.pages)){
 
             int sum = 0;
+            pageRowOffset.reserve(pages.size());
 
             switch (col.type){
                 case DataType::INT32:
@@ -33,6 +32,7 @@ class ColumnT{
                     for(Page* page: pages){
 
                         uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
+                        pageRowOffset.push_back(sum);
                         sum += numRows;
                     }
                     break;
@@ -45,14 +45,13 @@ class ColumnT{
                             numRows = 0;
                         }
                         
+                        pageRowOffset.push_back(sum);
                         sum += numRows;
                     }
                 
                     break;
             }
-
             size = sum;
-
         }
         
         // creates a new page, allocates memory for it and adds it to the vector
@@ -81,32 +80,25 @@ class ColumnT{
 
         value_t* getValueAt(size_t idx) const{
 
-            size_t totalRows = 0; // total rows from all pages
-
-            for(size_t i = 0; i < pages.size(); i++){
-
-                uint16_t numRows = *reinterpret_cast<uint16_t*>(pages[i]->data);
-                totalRows += numRows;
-
-                // value is in this page
-                if(idx < totalRows){
-
-                    size_t rowsTillLastPage = totalRows - numRows; // how many rows do the previous page have in total
-                    
-                    // if we have three pages of 4 rows e.g and idx = 9
-                    // the value is located in the third page at pos 1
-                    // rowsTillLastPage = 12 - 4 = 8
-                    // pos = 9 - 8 = 1
-                    size_t pos = idx - rowsTillLastPage;
-
-                    value_t* val = reinterpret_cast<value_t*>(pages[i]->data + sizeof(uint16_t) + pos*sizeof(value_t));
-
-                    return val;
-                }
-               
+            if(idx >= size){
+                return NULL;
             }
 
-            return NULL;
+            // first element that is greater than idx
+            auto it = std::upper_bound(pageRowOffset.begin(), pageRowOffset.end(), idx);
+
+            // find previous page index
+            size_t pageIdx = (it - pageRowOffset.begin()) - 1; 
+
+            size_t pageStart = pageRowOffset[pageIdx];
+            size_t row = idx - pageStart;
+
+            value_t* val = reinterpret_cast<value_t*>(pages[pageIdx]->data 
+                        + sizeof(uint16_t) + row*sizeof(value_t));
+
+
+
+            return val;
         }
 
 

@@ -58,6 +58,9 @@ void ColumnTInserter::insert(const value_t& val){
         // initialize page with numOfValues = 0
         *reinterpret_cast<uint16_t*>(column.pages[0]->data) = 0;
         
+        // row offset for first page: 0
+        column.pageRowOffset.push_back(0);
+        
         // no need to increment lastPageIdx, it is already 0
     }
     
@@ -71,6 +74,9 @@ void ColumnTInserter::insert(const value_t& val){
         
         // initialize page with numOfValues = 0
         *reinterpret_cast<uint16_t*>(page->data) = 0;
+        
+        // row offset for new page is the current column size
+        column.pageRowOffset.push_back(column.size);
     }
 
     Page* page = column.pages[lastPageIdx];
