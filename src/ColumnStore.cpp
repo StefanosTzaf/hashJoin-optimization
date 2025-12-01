@@ -9,30 +9,6 @@ Page* ColumnT::newPage(){
     return page;
 }
 
-value_t* ColumnT::getValueAt(size_t rowIdx) const{
-
-    if(rowIdx >= size){
-        return NULL;
-    }
-
-    // first element that is greater than idx
-    auto it = std::upper_bound(pageRowOffset.begin(), pageRowOffset.end(), rowIdx);
-
-    // find previous page index
-    // (it - pageRowOffset.begin) = index it
-    size_t pageIdx = (it - pageRowOffset.begin()) - 1; 
-
-    size_t pageStart = pageRowOffset[pageIdx];
-    size_t dataIdx = rowIdx - pageStart; //row inside page
-
-    value_t* val = reinterpret_cast<value_t*>(pages[pageIdx]->data 
-                + sizeof(uint16_t) + dataIdx*sizeof(value_t));
-
-    return val;
-}
-
-
-
 size_t ColumnTInserter::dataBegin(Page* page) const {
 
     // first 2 bytes of the page are its number of values

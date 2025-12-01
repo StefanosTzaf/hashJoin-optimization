@@ -42,3 +42,10 @@ Finally we did it with a loop for an infinate number of pages and every querry r
 108252 ms
 
 -60%
+
+
+107088 ms
+106814 ms
+106040 ms
+106785 ms
+106330 ms
