@@ -78,29 +78,8 @@ class ColumnT{
             return pages;
         }
 
-        value_t* getValueAt(size_t idx) const{
-
-            if(idx >= size){
-                return NULL;
-            }
-
-            // first element that is greater than idx
-            auto it = std::upper_bound(pageRowOffset.begin(), pageRowOffset.end(), idx);
-
-            // find previous page index
-            size_t pageIdx = (it - pageRowOffset.begin()) - 1; 
-
-            size_t pageStart = pageRowOffset[pageIdx];
-            size_t row = idx - pageStart;
-
-            value_t* val = reinterpret_cast<value_t*>(pages[pageIdx]->data 
-                        + sizeof(uint16_t) + row*sizeof(value_t));
-
-
-
-            return val;
-        }
-
+        // returns a pointer to the value_t in idx row
+        value_t* getValueAt(size_t idx) const;
 
 
         // destructor

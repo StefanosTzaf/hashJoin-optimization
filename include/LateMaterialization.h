@@ -21,11 +21,11 @@ ColumnarTable execute_root_hash_join(
     const std::vector<std::tuple<size_t, DataType>>& output_attrs);
    
     
-
+// converts ColumnarTable to vector<ColumnT>
 ExecuteResult my_copy_scan(const ColumnarTable& table,
     const std::vector<std::tuple<size_t, DataType>>& output_attrs, uint16_t table_id);
 
-    
+// converts a value_t to Data type  
 Data valuet_to_Data(const value_t& val, const ColumnarTable& table);
 
 std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, const Plan& plan);

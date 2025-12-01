@@ -39,7 +39,7 @@ struct RootJoinAlgorithm{
             tempResults.emplace_back(type);
         }
         
-        std::vector<ColumnTInserter> inserters;
+        std::vector<ColumnTInserter> inserters; // create an inserter for each column
         inserters.reserve(output_attrs.size());
         for(int i = 0; i < output_attrs.size(); i++){
             DataType type = std::get<1>(output_attrs[i]);
@@ -65,7 +65,7 @@ struct RootJoinAlgorithm{
                     
                     value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                    
-                    if(val.is_null()){
+                    if(val.is_null()){ // ingore null values
                         idx++;
                         continue;
                     }
@@ -232,7 +232,7 @@ struct RootJoinAlgorithm{
 
         for (auto [col_idx, data_type]: output_attrs) {
 
-            auto& column = results.columns[output_col];
+            Column& column = results.columns[output_col];
 
             // check data type of column
 
@@ -275,11 +275,11 @@ struct RootJoinAlgorithm{
 
                         }
                         else{
-                        // materialization of string
-                        const ColumnarTable& table = plan.inputs[val.tableIdx];
-                        Data data_str = valuet_to_Data(val, table);
-                        std::string str = std::get<std::string>(data_str);
-                        inserter.insert(str);
+                            // materialization of string
+                            const ColumnarTable& table = plan.inputs[val.tableIdx];
+                            Data data_str = valuet_to_Data(val, table);
+                            std::string str = std::get<std::string>(data_str);
+                            inserter.insert(str);
                         }
                     }
                 }
@@ -288,7 +288,7 @@ struct RootJoinAlgorithm{
             output_col++;
         }
 
-        int total_rows = tempResults[0].getSize(); // without nulls
+        int total_rows = tempResults[0].getSize(); 
 
         // Set the number of rows in the result
         results.num_rows = total_rows;           
@@ -334,12 +334,7 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
     
     namespace views = ranges::views;
     
-    // result is a vector of rows, each element of the outer vector is a row
-    // initialize all values to null (with NULLTAG in default constructor of value_t)
-    // std::vector<std::vector<value_t>> results(table.num_rows,
-    //     std::vector<value_t>(output_attrs.size()));
-
-    // a vector with ColumnT as elements that hold value_T
+    // a vector with ColumnT as elements that hold value_t
     // output_attrs.size because we dont need all of the columns
     std::vector<ColumnT> results;
     results.reserve((output_attrs.size()));
@@ -354,7 +349,6 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
     // process columns from begin to end(indexes of output_attrs)
     auto task = [&](size_t begin, size_t end) {
 
-        
         // iterate through all columns to be processed
         for (size_t column_idx = begin; column_idx < end; ++column_idx) {
             
@@ -408,10 +402,12 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                                 ++row_idx; // move to next row
                                 ++data_idx; // move to next data index
 
-                            } else { // row is null so continue
+                            } 
+                            else { // add null value
                                 value_t val;
                                 inserter.insert(val);
                                 ++row_idx;
+                                // should not increment data_idx
                             }
                         }
                         break;
@@ -426,10 +422,6 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                             if (row_idx >= table.num_rows) {
                                 throw std::runtime_error("row_idx");
                             }
-                            
-                            // results[row_idx][column_idx] = value_t::from_string_ref(
-                            //             table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, value_t::LONG_STR_TAG);
-
 
                             value_t val = value_t::from_string_ref(table_id, static_cast<uint16_t>(in_col_idx), 
                                                         page_idx - 1, value_t::LONG_STR_TAG);
@@ -460,9 +452,6 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                                     if (row_idx >= table.num_rows) {
                                         throw std::runtime_error("row_idx");
                                     }
-                                   
-                                    // results[row_idx][column_idx] = value_t::from_string_ref(
-                                    //     table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
 
                                     value_t val = value_t::from_string_ref(table_id, 
                                         static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
@@ -472,8 +461,10 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                                     data_idx++; // move to next string offset
                                     row_idx++;  // move to next row
                                 } 
-                                // row is null, continue with next row
+                                // insert null value
                                 else {
+                                    value_t val;
+                                    inserter.insert(val);
                                     ++row_idx;
                                 }
                             }
