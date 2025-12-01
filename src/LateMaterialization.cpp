@@ -23,132 +23,216 @@ struct RootJoinAlgorithm{
     auto run(){
         namespace views = ranges::views;
 
+        // initialize results columns
+        for (auto [col_idx, data_type]: output_attrs) {
+                
+            results.columns.emplace_back(data_type); // add new column to columnarTable
+        }
+
+        
         std::unordered_map<int32_t, std::vector<size_t>> hash_table;
-
-        auto numOfColumns = output_attrs.size(); // number of columns in final result
-        std::vector<std::vector<value_t>> temp_results; // temporary storage for each column of final result
-        temp_results.resize(numOfColumns);
-
-        size_t num_rows = 0; // number of rows in the final result
+        
+        std::vector<ColumnT> tempResults; // temporary storage for joined columns
+        tempResults.reserve(output_attrs.size());
+        for(size_t i = 0; i < output_attrs.size(); i++){
+            DataType type = std::get<1>(output_attrs[i]);
+            tempResults.emplace_back(type);
+        }
+        
+        std::vector<ColumnTInserter> inserters;
+        inserters.reserve(output_attrs.size());
+        for(int i = 0; i < output_attrs.size(); i++){
+            DataType type = std::get<1>(output_attrs[i]);
+            inserters.emplace_back(tempResults[i]);
+        }
         
         // BUILD PHASE
         if (build_left) {
 
-            for (auto&& [idx, record]: left | views::enumerate) {   
+            if(left.empty() || (left[left_col].getSize() == 0)){
+                return;
+            }
+            
+            ColumnT& keyColumn = left[left_col]; // extract the column with the key
+            size_t  idx       = 0; // row index
+    
+            // iterates over all pages of column with join key
+            for (const Page* page: keyColumn.getPages()) {    
+
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++) {
+                    
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                   
+                    if(val.is_null()){
+                        idx++;
+                        continue;
+                    }
+                   
+                    int32_t key = val.get_int();
                 
-                if(record[left_col].is_null()){
-                    continue;
+                    if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                        // append idx to the appropriate vector of the hash table
+                        hash_table.emplace(key, std::vector<size_t>(1, idx));
+    
+                    // if not found, create new entry in hash table with idx
+                    } else {
+                        itr->second.push_back(idx);
+                    }         
+    
+                    idx++;
                 }
-
-                int32_t key = record[left_col].get_int();
-      
-                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-           
-                    hash_table.emplace(key, std::vector<size_t>(1, idx));
-
-                // if not found, create new entry in hash table with idx
-                } else {
-                    itr->second.push_back(idx);
-                }         
             }
 
             // PROBE PHASE
-            for (auto& right_record: right) {
 
-                if(right_record[right_col].is_null()){
-                    continue;
-                }
-
-                int32_t key = right_record[right_col].get_int();
+            ColumnT& probeKeyColumn = right[right_col]; // column with join key
+            size_t right_idx = 0; //row index for right table
+           
+            // iterate through all pages of column with join key
+            for (const Page* page: probeKeyColumn.getPages()) {
                 
-                // for every matching key, find all matching build-side rows
-                // combine columns from both tables and store each column in temp_results
-                if (auto itr = hash_table.find(key); itr != hash_table.end()) {                   
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
-                    for (auto left_idx: itr->second) {
-                        auto&             left_record = left[left_idx];         
+                for(size_t row = 0; row < numRows; row++) {
+                
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        right_idx++;
+                        continue;
+                    }
+                   
+                    int32_t key = val.get_int();
+                
+                    // for every matching key, find all matching build-side rows
+                    if (auto itr = hash_table.find(key); itr != hash_table.end()) {
 
-                        // combine records
-                        // we should now create columns instead of rows
+                        // for each matching left row index from
+                        // itr->second: the vector with row indices
+                        for (auto left_idx: itr->second) {               
+                           
+                            size_t output_col = 0;
 
-                        size_t output_col = 0; // index for column of temp_results
-                        // for each (column index, type) of desired output
-                        for (auto [col_idx, data_type]: output_attrs) {
+                            // for each column index we want in the final result
+                            for (auto [col_idx, _]: output_attrs) {
 
-                            // wanted column is on left table
-                            if (col_idx < left_record.size()) {
-                                // store the col_idx-th value of the row
-                                temp_results[output_col].emplace_back(left_record[col_idx]);
-                            } 
-                            // wanted column is on right table
-                            else {
-                                temp_results[output_col].emplace_back(
-                                    right_record[col_idx - left_record.size()]);
+                                value_t* val = NULL;
+
+                                // if index < number of columns (wanted column is on left table)
+                                if (col_idx < left.size()) {
+                                    val = left[col_idx].getValueAt(left_idx);
+                                } 
+                                // wanted column is on right table
+                                else {
+                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                }
+                                inserters[output_col].insert(*val);
+                                
+                                output_col++;
                             }
-                            output_col++;
                         }
                     }
+                    right_idx++;
                 }
+                
             }
 
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
-        } else {
-            for (auto&& [idx, record]: right | views::enumerate) {
+        } 
+        else {
 
-                if(record[right_col].is_null()){
-                    continue;
-                }
+            if(right.empty() || (right[right_col].getSize() == 0)){
+                return;
+            }
 
-                int32_t key = record[right_col].get_int();
-              
-                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                    hash_table.emplace(key, std::vector<size_t>(1, idx));
-                } 
-                else {
-                    itr->second.push_back(idx);
+
+            ColumnT& keyColumn = right[right_col];
+            size_t idx = 0; // row index
+
+            for (const Page* page: keyColumn.getPages()) {
+
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++){
+                    
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        idx++;
+                        continue;
+                    }
+                   
+                    int32_t key = val.get_int();
+                
+                    if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                        // append idx to the appropriate vector of the hash table
+                        hash_table.emplace(key, std::vector<size_t>(1, idx));
+    
+                    // if not found, create new entry in hash table with idx
+                    } else {
+                        itr->second.push_back(idx);
+                    }         
+    
+                    idx++;
                 }
             }
 
-            for (auto& left_record: left) {
+            ColumnT& probeKeyColumn = left[left_col];
+            size_t left_idx = 0; //row idx for left table
 
-                if(left_record[left_col].is_null()){
-                    continue;
-                }
-                
-                int32_t key = left_record[left_col].get_int();
+            for (const Page* page: probeKeyColumn.getPages()) {
 
-                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-                   
-                    for (auto right_idx: itr->second) {
-                   
-                        auto&             right_record = right[right_idx];
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
-                        size_t output_col = 0;
-                        for (auto [col_idx, _]: output_attrs) {
-                   
-                            if (col_idx < left_record.size()) {
-                                temp_results[output_col].emplace_back(left_record[col_idx]);
-                            } 
-                            else {
-                                temp_results[output_col].emplace_back(right_record[col_idx - left_record.size()]);
+                for(size_t row = 0; row < numRows; row++){
+                    
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        left_idx++;
+                        continue;
+                    }
+                    
+                    int32_t key = val.get_int();               
+    
+
+                    if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                        
+                        for (auto right_idx: itr->second) {
+
+                            size_t output_col = 0;
+                                        
+                            for (auto [col_idx, _]: output_attrs) {
+
+                                value_t* val = NULL;
+                        
+                                if (col_idx < left.size()) {
+                                    val = left[col_idx].getValueAt(left_idx);
+                              } 
+                                else {
+                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                }
+
+                                inserters[output_col].insert(*val);
+                              
+                                output_col++;
                             }
-                            output_col++;
+
                         }
                     }
+                    left_idx++;
                 }
                 
             }
         }
 
-        // now that we have all columns in temp_results
+        // now that we have all columns in results (vector<ColumnT>)
         // we need to fill the ColumnarTable with the materialized columns
         size_t output_col = 0;
 
         for (auto [col_idx, data_type]: output_attrs) {
-            
-            results.columns.emplace_back(data_type); // add new column to table
-            auto& column = results.columns.back();
+
+            auto& column = results.columns[output_col];
 
             // check data type of column
 
@@ -157,14 +241,21 @@ struct RootJoinAlgorithm{
 
                 size_t num_of_null_values = 0;
 
-                // iterate through all values of the column
-                for(auto& val: temp_results[output_col]){
-                    if(val.is_int()){
-                        inserter.insert(val.get_int()); // simple insertion
+                // iterate through all values of the column in tempResults
+                for(Page* page: tempResults[output_col].getPages()){
 
-                    }
-                    else{
-                        inserter.insert_null();
+                    uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
+
+                    for(size_t i = 0; i < numRows; i++){
+                        value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + i*sizeof(value_t));
+
+                        if(val.is_null()){
+                            inserter.insert_null();
+
+                        }
+                        else{
+                            inserter.insert(val.get_int());
+                        }
                     }
                 }
                 inserter.finalize();
@@ -172,17 +263,24 @@ struct RootJoinAlgorithm{
             else if(data_type == DataType::VARCHAR){
                 ColumnInserter<std::string> inserter(column);
 
-                for(auto& val: temp_results[output_col]){
-                    if(val.is_null()){
-                        inserter.insert_null();
-                    }
-                    else{
+                for(Page* page: tempResults[output_col].getPages()){
+                    
+                    uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
+
+                    for(size_t i = 0; i < numRows; i++){
+                        value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + i*sizeof(value_t));
+
+                        if(val.is_null()){
+                            inserter.insert_null();
+
+                        }
+                        else{
                         // materialization of string
                         const ColumnarTable& table = plan.inputs[val.tableIdx];
                         Data data_str = valuet_to_Data(val, table);
                         std::string str = std::get<std::string>(data_str);
                         inserter.insert(str);
-
+                        }
                     }
                 }
                 inserter.finalize();
@@ -190,11 +288,10 @@ struct RootJoinAlgorithm{
             output_col++;
         }
 
-        int total_rows = temp_results[0].size(); // without nulls
+        int total_rows = tempResults[0].getSize(); // without nulls
 
         // Set the number of rows in the result
-        results.num_rows = total_rows;     
-        
+        results.num_rows = total_rows;           
     
     }
 
@@ -231,16 +328,25 @@ ColumnarTable execute_root_hash_join(
 }
 
 
-// converts columnar table to row-based format
-std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
+// converts columnar table to vector<ColumnT>
+ExecuteResult my_copy_scan(const ColumnarTable& table,
      const std::vector<std::tuple<size_t, DataType>>& output_attrs, uint16_t table_id) {
     
     namespace views = ranges::views;
     
     // result is a vector of rows, each element of the outer vector is a row
     // initialize all values to null (with NULLTAG in default constructor of value_t)
-    std::vector<std::vector<value_t>> results(table.num_rows,
-        std::vector<value_t>(output_attrs.size()));
+    // std::vector<std::vector<value_t>> results(table.num_rows,
+    //     std::vector<value_t>(output_attrs.size()));
+
+    // a vector with ColumnT as elements that hold value_T
+    // output_attrs.size because we dont need all of the columns
+    std::vector<ColumnT> results;
+    results.reserve((output_attrs.size()));
+
+    for (auto [col_idx, data_type] : output_attrs) {
+        results.emplace_back(data_type);
+    }
     
     // stores data type of each column
     std::vector<DataType>          types(table.columns.size());
@@ -255,17 +361,26 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
             size_t in_col_idx = std::get<0>(output_attrs[column_idx]);
             auto& column = table.columns[in_col_idx];
             types[in_col_idx] = column.type;
+            
             size_t row_idx = 0;
             uint16_t page_idx = 0;
+
+            ColumnT& column_t = results[column_idx]; // move from struct Column to ColumnT
+
+            // create an inserter for each columnT
+            ColumnTInserter inserter(column_t); 
             
             // iterate through all pages of the column
             for (auto* page:
                 column.pages | views::transform([](auto* page) { return page->data; })) {
+
                     ++page_idx;
+
                     // check data type of column: either INT32 or VARCHAR
                     switch (column.type) {
     
                     case DataType::INT32: {
+                        
                         auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
                         auto* data_begin = reinterpret_cast<int32_t*>(page + 4); // data of int32 starts at offset 4
                         
@@ -287,12 +402,15 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                     throw std::runtime_error("row_idx");
                                 }
                                 
-                                results[row_idx][column_idx] = value_t::from_int(value); // store the int value in results
+                                value_t val = value_t::from_int(value);
+                                inserter.insert(val); // insert value into ColumnT
         
                                 ++row_idx; // move to next row
                                 ++data_idx; // move to next data index
 
                             } else { // row is null so continue
+                                value_t val;
+                                inserter.insert(val);
                                 ++row_idx;
                             }
                         }
@@ -309,8 +427,15 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                 throw std::runtime_error("row_idx");
                             }
                             
-                            results[row_idx][column_idx] = value_t::from_string_ref(
-                                        table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, value_t::LONG_STR_TAG);
+                            // results[row_idx][column_idx] = value_t::from_string_ref(
+                            //             table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, value_t::LONG_STR_TAG);
+
+
+                            value_t val = value_t::from_string_ref(table_id, static_cast<uint16_t>(in_col_idx), 
+                                                        page_idx - 1, value_t::LONG_STR_TAG);
+
+                            inserter.insert(val);
+
                             row_idx++;  // move to next row
                         } 
                         // LONG string (following page)
@@ -336,8 +461,13 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
                                         throw std::runtime_error("row_idx");
                                     }
                                    
-                                    results[row_idx][column_idx] = value_t::from_string_ref(
-                                        table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
+                                    // results[row_idx][column_idx] = value_t::from_string_ref(
+                                    //     table_id, static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
+
+                                    value_t val = value_t::from_string_ref(table_id, 
+                                        static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
+
+                                    inserter.insert(val);
 
                                     data_idx++; // move to next string offset
                                     row_idx++;  // move to next row
@@ -358,7 +488,6 @@ std::vector<std::vector<value_t>> my_copy_scan(const ColumnarTable& table,
     // run the task in parallel using the filter thread pool
     // each task processes a subset of columns
     filter_tp.run(task, output_attrs.size());
-
     return results;
 }
 
@@ -426,39 +555,46 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
     throw std::runtime_error("Unknown value_t type");
 }
 
-// Convert ExecuteResult (value_t) to Table format (Data)
+//Convert ExecuteResult (value_t) to Table format (Data)
 std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, const Plan& plan) {
     
-    std::vector<std::vector<Data>> data_results; // final result in Data format
-    data_results.reserve(results.size());
+    // std::vector<std::vector<Data>> data_results; // final result in Data format
+    // data_results.reserve(results.size());
 
     
-    for (const auto& row : results) {
+    // for (const ColumnT& col: results) {
         
-        std::vector<Data> data_row;
-        data_row.reserve(row.size());
+    //     std::vector<Data> data_row;
+    //     data_row.reserve(results.size());
         
-        // val is of type value_t
-        for (const auto& val : row) {
-         
-            if (val.is_null()) {
-                data_row.emplace_back(std::monostate{});
-            } 
-            else if (val.is_int()) {
-                data_row.emplace_back(val.get_int());
-            } 
-            else {
-                // String materialization from value_t
-                uint16_t table_idx = val.tableIdx;
-                auto& table = plan.inputs[table_idx];
-                Data data_value = valuet_to_Data(val, table); // convert value_t to Data
-                data_row.emplace_back(std::move(data_value));
+    //     for (Page* page: col.getPages()) {
+            
+    //         uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
 
-            }
-        }
-        
-        data_results.emplace_back(std::move(data_row));
-    }
+    //         for(size_t i = 0; i < numRows; i++){
+
+    //             value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(numRows) + sizeof(value_t) * i);
+              
+    //             if (val.is_null()) {
+    //                 data_row.emplace_back(std::monostate{});
+    //             } 
+    //             else if (val.is_int()) {
+    //                 data_row.emplace_back(val.get_int());
+    //             } 
+    //             else {
+    //                 // String materialization from value_t
+    //                 uint16_t table_idx = val.tableIdx;
+    //                 auto& table = plan.inputs[table_idx];
+    //                 Data data_value = valuet_to_Data(val, table); // convert value_t to Data
+    //                 data_row.emplace_back(std::move(data_value));
     
-    return data_results;
+    //             }
+    //         }
+
+    //     }
+        
+    //     data_results.emplace_back(std::move(data_row));
+    // }
+    
+    // return data_results;
 }

@@ -28,117 +28,204 @@ struct JoinAlgorithm {
         // one key might correspond to multiple rows
         std::unordered_map<int32_t, std::vector<size_t>> hash_table;
 
+        for(size_t i = 0; i < output_attrs.size(); i++){
+            DataType type = std::get<1>(output_attrs[i]);
+            results.emplace_back(std::move(ColumnT(type)));
+        }
+
+        std::vector<ColumnTInserter> inserters;
+        inserters.reserve(output_attrs.size());
+        for(int i = 0; i < output_attrs.size(); i++){
+            inserters.emplace_back(results[i]);
+        }
+
          // STEP 2 BUILD PHASE: take rows of left table, calculate hash value
          // and store in hash table
         if (build_left) {
 
-            // iterates over all rows of left table with row index idx
-            // record: the actual row
-            for (auto&& [idx, record]: left | views::enumerate) {                        
-
-                int32_t key = record[left_col].get_int();
-
-                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                    // append idx to the appropriate vector of the hash table
-                    hash_table.emplace(key, std::vector<size_t>(1, idx));
-
-                // if not found, create new entry in hash table with idx
-                } else {
-                    itr->second.push_back(idx);
-                }         
+            if(left.empty() || (left[left_col].getSize() == 0)){
+                return;
             }
 
-            // STEP 3 PROBE PHASE: take rows of right table, calculate hash value
+            ColumnT& keyColumn = left[left_col]; // extract the column with the key
+            size_t  idx       = 0; // row index
+
+            // iterates over all pages of column with join key
+            for (const Page* page: keyColumn.getPages()) {    
+
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++) {
+                    
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        idx++;
+                        continue;
+                    }
+                    
+                    int32_t key = val.get_int();
+                
+                    if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                        // append idx to the appropriate vector of the hash table
+                        hash_table.emplace(key, std::vector<size_t>(1, idx));
+    
+                    // if not found, create new entry in hash table with idx
+                    } else {
+                        itr->second.push_back(idx);
+                    }         
+    
+                    idx++;
+                }
+
+
+            }
+
+            // STEP 3 PROBE PHASE: take keys of right table, calculate hash value
             // and if it exists store it in temp_results (vector of columns)
 
-            // for each row of the right table
-            for (auto& right_record: right) {
+            ColumnT& probeKeyColumn = right[right_col]; // column with join key
+            size_t right_idx = 0; //row index for right table
 
-                int32_t key = right_record[right_col].get_int();
+            // iterate through all pages of column with join key
+            for (const Page* page: probeKeyColumn.getPages()) {
                 
-                // for every matching key, find all matching build-side rows
-                // combine columns from both tables into a new_record and 
-                // add it to the temp_results
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
-                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                for(size_t row = 0; row < numRows; row++) {
+                
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        right_idx++;
+                        continue;
+                    }
+                   
+                    int32_t key = val.get_int();
+                
+                    // for every matching key, find all matching build-side rows
+                    if (auto itr = hash_table.find(key); itr != hash_table.end()) {
 
-                    // for each matching left row index from
-                    // itr->second: the vector with row indices
-                    for (auto left_idx: itr->second) {
-                        auto&             left_record = left[left_idx]; 
-                        std::vector<value_t> new_record;
-                        new_record.reserve(output_attrs.size());
+                        // for each matching left row index from
+                        // itr->second: the vector with row indices
+                        for (auto left_idx: itr->second) {               
+                           
+                            size_t output_col = 0;
 
-                        // STEP 4 COMBINE RECORDS
+                            // for each column index we want in the final result
+                            for (auto [col_idx, _]: output_attrs) {
 
-                        //left_record  = [1, "Alice", 25]        // 3 columns (indices 0, 1, 2)
-                        //right_record = [100, "Order1"]         // 2 columns (indices 0, 1)
+                                value_t* val = NULL;
 
-                        // Virtual combined record: [1, "Alice", 25, 100, "Order1"]
-                        // Indices:                   0    1      2   3      4
+                                // if index < number of columns (wanted column is on left table)
+                                if (col_idx < left.size()) {
+                                    val = left[col_idx].getValueAt(left_idx);
+                                } 
+                                // wanted column is on right table
+                                else {
+                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                }
 
-                        // for each column index we want in the final result
-                        for (auto [col_idx, _]: output_attrs) {
+                                if(val == NULL){
+                                    continue;
+                                }
 
-                            // if index < number of columns (wanted column is on left table)
-                            if (col_idx < left_record.size()) {
-                                new_record.emplace_back(left_record[col_idx]);
-                            } 
-                            // wanted column is on right table
-                            else {
-                                new_record.emplace_back(
-                                    right_record[col_idx - left_record.size()]);
+                                inserters[output_col].insert(*val);
+                                
+                                output_col++;
                             }
                         }
-
-                        // add the combined row to final result
-                        results.emplace_back(std::move(new_record));
                     }
+                    right_idx++;
                 }
+                
             }
 
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
         } else {
-            for (auto&& [idx, record]: right | views::enumerate) {
 
-                int32_t key = record[right_col].get_int();
-              
-                if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                    hash_table.emplace(key, std::vector<size_t>(1, idx));
-                } 
-                else {
-                    itr->second.push_back(idx);
+            if(right.empty() || (right[right_col].getSize() == 0)){
+                return;
+            }
+
+            ColumnT& keyColumn = right[right_col];
+            size_t idx = 0; // row index
+
+            for (const Page* page: keyColumn.getPages()) {
+
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++){
+                    
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        idx++;
+                        continue;
+                    }
+                    
+                    int32_t key = val.get_int();
+                
+                    if (auto itr = hash_table.find(key); itr == hash_table.end()) {
+                        // append idx to the appropriate vector of the hash table
+                        hash_table.emplace(key, std::vector<size_t>(1, idx));
+    
+                    // if not found, create new entry in hash table with idx
+                    } else {
+                        itr->second.push_back(idx);
+                    }         
+    
+                    idx++;
                 }
             }
-            for (auto& left_record: left) {
-                
-                int32_t key = left_record[left_col].get_int();
 
-                if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-                   
-                    for (auto right_idx: itr->second) {
-                   
-                        auto&             right_record = right[right_idx];
-                        std::vector<value_t> new_record;
-                        new_record.reserve(output_attrs.size());
-                   
-                        for (auto [col_idx, _]: output_attrs) {
-                   
-                            if (col_idx < left_record.size()) {
-                                new_record.emplace_back(left_record[col_idx]);
-                            } 
-                            else {
-                                new_record.emplace_back(right_record[col_idx - left_record.size()]);
-                            }
-                        }
-                        results.emplace_back(std::move(new_record));
+            ColumnT& probeKeyColumn = left[left_col];
+            size_t left_idx = 0; //row idx for left table
+
+            for (const Page* page: probeKeyColumn.getPages()) {
+
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++){
+                    
+                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        left_idx++;
+                        continue;
                     }
+                    
+                    int32_t key = val.get_int();               
+    
+
+                    if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                        
+                        for (auto right_idx: itr->second) {
+
+                            size_t output_col = 0;
+                                        
+                            for (auto [col_idx, _]: output_attrs) {
+
+                                value_t* val = NULL;
+                        
+                                if (col_idx < left.size()) {
+                                    val = left[col_idx].getValueAt(left_idx);
+                              } 
+                                else {
+                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                }
+
+                                inserters[output_col].insert(*val);
+                                output_col++;
+                            }
+
+                        }
+                    }
+                    left_idx++;
                 }
                 
             }
         }
+        
     }
+
 
 };
 
@@ -153,11 +240,11 @@ ExecuteResult execute_hash_join(const Plan&          plan,
     auto&                          right_node  = plan.nodes[right_idx];
     auto&                          left_types  = left_node.output_attrs;
     auto&                          right_types = right_node.output_attrs;
-    auto                           left        = execute_impl(plan, left_idx); // recursiving computing of table
-    auto                           right       = execute_impl(plan, right_idx);
+    ExecuteResult                  left        = execute_impl(plan, left_idx); // recursiving computing of table
+    ExecuteResult                  right       = execute_impl(plan, right_idx);
     
   
-    std::vector<std::vector<value_t>> results; // for the joined rows   
+    ExecuteResult results; // for the joined rows   
 
     JoinAlgorithm join_algorithm{.build_left = join.build_left,
         .left                                = left,
