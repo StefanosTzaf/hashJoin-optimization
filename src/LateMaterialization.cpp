@@ -19,7 +19,6 @@ struct RootJoinAlgorithm{
     const std::vector<std::tuple<size_t, DataType>>& output_attrs; // (column index, type)
     const Plan&                                          plan;
 
-    template <class T>
     auto run(){
         namespace views = ranges::views;
 
@@ -63,7 +62,7 @@ struct RootJoinAlgorithm{
 
                 for(size_t row = 0; row < numRows; row++) {
                     
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                    
                     if(val.is_null()){ // ingore null values
                         idx++;
@@ -97,7 +96,7 @@ struct RootJoinAlgorithm{
 
                 for(size_t row = 0; row < numRows; row++) {
                 
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         right_idx++;
                         continue;
@@ -157,7 +156,7 @@ struct RootJoinAlgorithm{
 
                 for(size_t row = 0; row < numRows; row++){
                     
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         idx++;
                         continue;
@@ -187,7 +186,7 @@ struct RootJoinAlgorithm{
 
                 for(size_t row = 0; row < numRows; row++){
                     
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         left_idx++;
                         continue;
@@ -247,7 +246,7 @@ struct RootJoinAlgorithm{
                     uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
 
                     for(size_t i = 0; i < numRows; i++){
-                        value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + i*sizeof(value_t));
+                        const value_t& val = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + i*sizeof(value_t));
 
                         if(val.is_null()){
                             inserter.insert_null();
@@ -268,7 +267,7 @@ struct RootJoinAlgorithm{
                     uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
 
                     for(size_t i = 0; i < numRows; i++){
-                        value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + i*sizeof(value_t));
+                        const value_t& val = *reinterpret_cast<value_t*>(page->data + sizeof(uint16_t) + i*sizeof(value_t));
 
                         if(val.is_null()){
                             inserter.insert_null();
@@ -320,10 +319,10 @@ ColumnarTable execute_root_hash_join(
 
     
     // join key is always int32_t, so no need to check its type
-    root_join_algorithm.run<int32_t>();
+    root_join_algorithm.run();
       
 
-    // this is filled by the run<T> method
+    // this is filled by the run method
     return results;
 }
 

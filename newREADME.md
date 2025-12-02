@@ -40,6 +40,8 @@ value_t located at row 9 we have:
     -   calculation of previous page index
     -   calculation of row where the value is located within the page (9 - 8 = 1)
 
+upper_bound performs a binary search, so this operation is O(nlogn)
+
 ### Page format
 Each page is the same for both INT32 and VARCHAR values, since it holds value_t.
 The first 2 bytes (uint16_t) is the number of rows for each page(including nulls).

@@ -19,8 +19,6 @@ struct JoinAlgorithm {
     size_t                                           left_col, right_col; // indexes of join keys for each table
     const std::vector<std::tuple<size_t, DataType>>& output_attrs; // (column index, type)
 
-
-    template <class T>
     auto run() {
         namespace views = ranges::views;
 
@@ -57,7 +55,7 @@ struct JoinAlgorithm {
 
                 for(size_t row = 0; row < numRows; row++) {
                     
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         idx++;
                         continue;
@@ -89,11 +87,11 @@ struct JoinAlgorithm {
             // iterate through all pages of column with join key
             for (const Page* page: probeKeyColumn.getPages()) {
                 
-                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
                 
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         right_idx++;
                         continue;
@@ -152,11 +150,11 @@ struct JoinAlgorithm {
 
             for (const Page* page: keyColumn.getPages()) {
 
-                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++){
                     
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         idx++;
                         continue;
@@ -182,11 +180,11 @@ struct JoinAlgorithm {
 
             for (const Page* page: probeKeyColumn.getPages()) {
 
-                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++){
                     
-                    value_t val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
                     if(val.is_null()){
                         left_idx++;
                         continue;
@@ -256,7 +254,7 @@ ExecuteResult execute_hash_join(const Plan&          plan,
 
     
     // join key is always int32_t, so no need to check its type
-    join_algorithm.run<int32_t>();
+    join_algorithm.run();
       
 
     // this is filled by the run<T> method
