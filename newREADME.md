@@ -38,7 +38,7 @@ value_t located at row 9 we have:
     -   pageRowOffset = (0, 4, 8, 12)
     -   upper_bound(vector.begin, vector.end, 9) = 12
     -   calculation of previous page index
-    -   calculation of row where the value is located within the page
+    -   calculation of row where the value is located within the page (9 - 8 = 1)
 
 ### Page format
 Each page is the same for both INT32 and VARCHAR values, since it holds value_t.
