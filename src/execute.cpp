@@ -6,8 +6,6 @@
 #include "ColumnStore.h"
 #include <Unchained.h>
 
-std::array<uint16_t,2048> DirectoryEntry::bloom_lookup;
-
 namespace Contest {
 
 // recursively computes the result of the plan node with index node_idx
