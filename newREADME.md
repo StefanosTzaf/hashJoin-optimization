@@ -6,6 +6,21 @@ Parts implemented by each member:
     - Column Store: Eleftheria Galiatsatou
     - Hash table: Stefanos Tzaferis
 
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
+cmake --build build -- -j $(nproc) fast
+
+./build/fast plans.json
+```
+
+To run the tests:
+
+```bash
+./build/unit_tests
+./build/unit_tests_unchained
+./build/unit_tests_columnStore
+```
+
 
 **Late Materialization**
 
