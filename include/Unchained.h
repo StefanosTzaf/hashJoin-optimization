@@ -4,6 +4,8 @@
 #include <random>
 #include <array>
 #include <iostream>
+#include <nmmintrin.h>
+
 
 struct Tuple {
     int32_t key;
@@ -119,25 +121,9 @@ class UnchainedHashTable {
         static constexpr uint32_t PREFIX_BITS = 16;
         static constexpr uint32_t PREFIX_COUNT = 1u << PREFIX_BITS;
 
-        // simple crc32 hash function 
-        uint32_t crc32(uint32_t data) {
-            uint32_t crc = 0xFFFFFFFF;
-            // for each byte
-            for (int i = 0; i < 4; i++) {
-                uint8_t byte = (data >> (i*8)) & 0xFF;
-                crc ^= byte;
-                for (int j = 0; j < 8; j++) {
-                    if (crc & 1)
-                        crc = (crc >> 1) ^ 0xEDB88320;
-                    else
-                        crc = crc >> 1;
-                }
-            }
-            return crc ^ 0xFFFFFFFF;
-        }
 
         inline uint32_t hash_prefix(int32_t key) {
-            uint32_t h = crc32(key);
+            uint32_t h = _mm_crc32_u32(0, key);
             return h >> (32 - PREFIX_BITS);
         }
 
@@ -191,7 +177,7 @@ class UnchainedHashTable {
                 uint16_t bloom = 0;
                 if (prefix_count[i] > 0) {
                     for (uint32_t j = prefix_offset[i]; j < prefix_offset[i] + prefix_count[i]; j++) {
-                        bloom |= DirectoryEntry::bloom_lookup[DirectoryEntry::bloomTag(crc32(tuple_buffer[j].key))];
+                        bloom |= DirectoryEntry::bloom_lookup[DirectoryEntry::bloomTag(_mm_crc32_u32(0, (uint32_t)tuple_buffer[j].key))];
                     }
                 }
                 
@@ -209,6 +195,7 @@ class UnchainedHashTable {
         }
 
         void insert(int32_t key, size_t row_id) {
+            uint32_t h = _mm_crc32_u32(0, key);
             temp_tuples.emplace_back(key, row_id);
         }
         void build() {
@@ -223,7 +210,7 @@ std::vector<size_t> search(int32_t key) {
     std::vector<size_t> results;
     
     // 1. Compute hash and get prefix (bucket)
-    uint32_t hash = crc32(key);
+    uint32_t hash = _mm_crc32_u32(0, key);
     uint32_t bucket = hash >> (32 - PREFIX_BITS);
     
     // 2. Check if bucket is empty first

@@ -1,12 +1,14 @@
 #include <hardware.h>
 #include <plan.h>
 #include <table.h>
+#include <inner_column.h>
+#include "LateMaterialization.h"
+#include "ColumnStore.h"
+#include <Unchained.h>
+
+std::array<uint16_t,2048> DirectoryEntry::bloom_lookup;
 
 namespace Contest {
-
-// similar to typedef: write ExecuteResult instead of std::vector<std::vector<Data>>
-// this is row-based
-using ExecuteResult = std::vector<std::vector<Data>>;
 
 // recursively computes the result of the plan node with index node_idx
 // depending on its type: ScanNode or JoinNode
@@ -21,159 +23,207 @@ struct JoinAlgorithm {
     const std::vector<std::tuple<size_t, DataType>>& output_attrs; // (column index, type)
 
 
-    template <class T>
     auto run() {
         namespace views = ranges::views;
 
         // STEP 1: the hash table for joining: type of join key, vector of row indexes that contain the key: 
         // one key might correspond to multiple rows
-        std::unordered_map<T, std::vector<size_t>> hash_table;
+        UnchainedHashTable hash_table;
 
-         // STEP 2 BUILD PHASE: WE TAKE THE ROWS OF LEFT TABLE AND 
-        // CALCULATE THE HASH VALUE OF EACH KEY AND STORE IT IN THE HASH TABLE
-        // if we build on the left table
+        for(size_t i = 0; i < output_attrs.size(); i++){
+            DataType type = std::get<1>(output_attrs[i]);
+            results.emplace_back(std::move(ColumnT(type)));
+        }
+
+        std::vector<ColumnTInserter> inserters;
+        inserters.reserve(output_attrs.size());
+        for(int i = 0; i < output_attrs.size(); i++){
+            inserters.emplace_back(results[i]);
+        }
+
+         // STEP 2 BUILD PHASE: take rows of left table, calculate hash value
+         // and store in hash table
         if (build_left) {
 
-            // iterates over all rows of left table with row index idx
-            // record: the actual row
-            for (auto&& [idx, record]: left | views::enumerate) {
-
-                         
-                // use of visit because record[left_col] is a Data variant
-                // it might contain an int, double, string etc
-                std::visit(
-                    [&hash_table, idx = idx](const auto& key) {
-
-                        // holds the type of key
-                        using Tk = std::decay_t<decltype(key)>;
-
-                         // if the key's type matches the join type, insert it into hash table
-                        if constexpr (std::is_same_v<Tk, T>) {
-
-                            // try to find the key in the hash table
-                            if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                // append idx to the appropriate vector of the hash table
-                                hash_table.emplace(key, std::vector<size_t>(1, idx));
-
-                            // if not found, create new entry in hash table with idx
-                            } else {
-                                itr->second.push_back(idx);
-                            }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
-                        }
-                    },
-                    record[left_col]); // extracts the join key
+            if(left.empty() || (left[left_col].getSize() == 0)){
+                return;
             }
 
-            // STEP 3 PROBE PHASE: WE TAKE THE ROWS OF THE RIGHT TABLE, CALCULATE
-            // THE HASH VALUE OF EACH KEY AND CHECK IF IT ALREADY EXISTS
-            // IF SO, WE STORE IT IN THE FINAL TABLE, SINCE IT IS A RESULT OF JOIN
+            ColumnT& keyColumn = left[left_col]; // extract the column with the key
+            size_t  idx       = 0; // row index
 
-            // for each row of the right table
-            for (auto& right_record: right) {
-                std::visit(
-                    [&](const auto& key) {
-                        using Tk = std::decay_t<decltype(key)>;
-                        if constexpr (std::is_same_v<Tk, T>) {
+            // iterates over all pages of column with join key
+            for (const Page* page: keyColumn.getPages()) {    
 
-                            // for every matching key, find all matching build-side rows
-                            // combine columns from both tables into a new_record and 
-                            // add it to the final results
+                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
-                            // search for the key in the hash table
-                            if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-
-                                // for each matching left row index from
-                                // itr->second: the vector with row indices
-                                for (auto left_idx: itr->second) {
-                                    auto&             left_record = left[left_idx]; //get the whole left row
-                                    std::vector<Data> new_record;
-                                    new_record.reserve(output_attrs.size());
-
-                                    // STEP 4 COMBINE RECORDS
-
-                                    //left_record  = [1, "Alice", 25]        // 3 columns (indices 0, 1, 2)
-                                    //right_record = [100, "Order1"]         // 2 columns (indices 0, 1)
-
-                                    // Virtual combined record: [1, "Alice", 25, 100, "Order1"]
-                                    // Indices:                   0    1      2   3      4
+                for(size_t row = 0; row < numRows; row++) {
+                    
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        idx++;
+                        continue;
+                    }
+                    
+                    int32_t key = val.get_int();
+                    hash_table.insert(key, idx);  
+    
+                    idx++;
+                }
 
 
-                                    // for each column index 
-                                    for (auto [col_idx, _]: output_attrs) {
+            }
+            hash_table.build();
 
-                                        // if index < number of columns (wanted column is on left table)
-                                        if (col_idx < left_record.size()) {
-                                            new_record.emplace_back(left_record[col_idx]);
-                                        } 
-                                        // wanted column is on right table
-                                        else {
-                                            new_record.emplace_back(
-                                                right_record[col_idx - left_record.size()]);
-                                        }
-                                    }
+            // STEP 3 PROBE PHASE: take keys of right table, calculate hash value
+            // and if it exists store it in temp_results (vector of columns)
 
-                                    // add the combined row to final result
-                                    results.emplace_back(std::move(new_record));
+            ColumnT& probeKeyColumn = right[right_col]; // column with join key
+            size_t right_idx = 0; //row index for right table
+            
+            // Reuse vector to avoid allocations
+            std::vector<size_t> matching_indices;
+
+            // iterate through all pages of column with join key
+            for (const Page* page: probeKeyColumn.getPages()) {
+                
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++) {
+                
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        right_idx++;
+                        continue;
+                    }
+                   
+                    int32_t key = val.get_int();
+                
+                    // for every matching key, find all matching build-side rows
+                    matching_indices = hash_table.search(key);
+
+                        // for each matching left row index from
+                        // itr->second: the vector with row indices
+                        for (auto left_idx: matching_indices) {               
+                           
+                            size_t output_col = 0;
+
+                            // for each column index we want in the final result
+                            for (auto [col_idx, _]: output_attrs) {
+
+                                value_t* val = NULL;
+
+                                // if index < number of columns (wanted column is on left table)
+                                if (col_idx < left.size()) {
+                                    val = left[col_idx].getValueAt(left_idx);
+                                } 
+                                // wanted column is on right table
+                                else {
+                                    val = right[col_idx - left.size()].getValueAt(right_idx);
                                 }
+
+                                if(val == NULL){
+                                    continue;
+                                }
+
+                                inserters[output_col].insert(*val);
+                                
+                                output_col++;
                             }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
                         }
-                    },
-                    right_record[right_col]);
+
+                    right_idx++;
+                }
+                
             }
 
         // STEP 5: BUILD ON RIGHT TABLE
         // PROBE WITH LEFT TABLE, COMBINE MATCHES
         } else {
-            for (auto&& [idx, record]: right | views::enumerate) {
-                std::visit(
-                    [&hash_table, idx = idx](const auto& key) {
-                        using Tk = std::decay_t<decltype(key)>;
-                        if constexpr (std::is_same_v<Tk, T>) {
-                            if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                                hash_table.emplace(key, std::vector<size_t>(1, idx));
-                            } else {
-                                itr->second.push_back(idx);
-                            }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
-                        }
-                    },
-                    record[right_col]);
+
+            if(right.empty() || (right[right_col].getSize() == 0)){
+                return;
             }
-            for (auto& left_record: left) {
-                std::visit(
-                    [&](const auto& key) {
-                        using Tk = std::decay_t<decltype(key)>;
-                        if constexpr (std::is_same_v<Tk, T>) {
-                            if (auto itr = hash_table.find(key); itr != hash_table.end()) {
-                                for (auto right_idx: itr->second) {
-                                    auto&             right_record = right[right_idx];
-                                    std::vector<Data> new_record;
-                                    new_record.reserve(output_attrs.size());
-                                    for (auto [col_idx, _]: output_attrs) {
-                                        if (col_idx < left_record.size()) {
-                                            new_record.emplace_back(left_record[col_idx]);
-                                        } else {
-                                            new_record.emplace_back(
-                                                right_record[col_idx - left_record.size()]);
-                                        }
-                                    }
-                                    results.emplace_back(std::move(new_record));
+
+            ColumnT& keyColumn = right[right_col];
+            size_t idx = 0; // row index
+
+            for (const Page* page: keyColumn.getPages()) {
+
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++){
+                    
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        idx++;
+                        continue;
+                    }
+                    
+                    int32_t key = val.get_int();
+                
+                    hash_table.insert(key, idx);      
+    
+                    idx++;
+                }
+            }
+            hash_table.build();
+
+            ColumnT& probeKeyColumn = left[left_col];
+            size_t left_idx = 0; //row idx for left table
+            
+            // Reuse vector to avoid allocations
+            std::vector<size_t> matching_indices;
+
+            for (const Page* page: probeKeyColumn.getPages()) {
+
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+
+                for(size_t row = 0; row < numRows; row++){
+                    
+                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                    if(val.is_null()){
+                        left_idx++;
+                        continue;
+                    }
+                    
+                    int32_t key = val.get_int();               
+    
+
+                    matching_indices = hash_table.search(key);
+                        
+                        for (auto right_idx: matching_indices) {
+
+                            size_t output_col = 0;
+                                        
+                            for (auto [col_idx, _]: output_attrs) {
+
+                                value_t* val = NULL;
+                        
+                                if (col_idx < left.size()) {
+                                    val = left[col_idx].getValueAt(left_idx);
+                              } 
+                                else {
+                                    val = right[col_idx - left.size()].getValueAt(right_idx);
                                 }
+
+                                inserters[output_col].insert(*val);
+                                output_col++;
                             }
-                        } else if constexpr (not std::is_same_v<Tk, std::monostate>) {
-                            throw std::runtime_error("wrong type of field");
+
                         }
-                    },
-                    left_record[left_col]);
+                    
+                    left_idx++;
+                }
+                
             }
         }
+        
     }
+
+
 };
+
 
 ExecuteResult execute_hash_join(const Plan&          plan,
     const JoinNode&                                  join,
@@ -185,10 +235,11 @@ ExecuteResult execute_hash_join(const Plan&          plan,
     auto&                          right_node  = plan.nodes[right_idx];
     auto&                          left_types  = left_node.output_attrs;
     auto&                          right_types = right_node.output_attrs;
-    auto                           left        = execute_impl(plan, left_idx); // recursiving computing of table
-    auto                           right       = execute_impl(plan, right_idx);
+    ExecuteResult                  left        = execute_impl(plan, left_idx); // recursiving computing of table
+    ExecuteResult                  right       = execute_impl(plan, right_idx);
     
-    std::vector<std::vector<Data>> results; // for the joined rows
+  
+    ExecuteResult results; // for the joined rows   
 
     JoinAlgorithm join_algorithm{.build_left = join.build_left,
         .left                                = left,
@@ -197,34 +248,23 @@ ExecuteResult execute_hash_join(const Plan&          plan,
         .left_col                            = join.left_attr,
         .right_col                           = join.right_attr,
         .output_attrs                        = output_attrs};
+
     
-        if (join.build_left) {
-            // check data type of join key of left table
-            switch (std::get<1>(left_types[join.left_attr])) {
-            case DataType::INT32:   join_algorithm.run<int32_t>(); break;
-            case DataType::INT64:   join_algorithm.run<int64_t>(); break;
-            case DataType::FP64:    join_algorithm.run<double>(); break;
-            case DataType::VARCHAR: join_algorithm.run<std::string>(); break;
-        }
-    } else {
-        switch (std::get<1>(right_types[join.right_attr])) {
-        case DataType::INT32:   join_algorithm.run<int32_t>(); break;
-        case DataType::INT64:   join_algorithm.run<int64_t>(); break;
-        case DataType::FP64:    join_algorithm.run<double>(); break;
-        case DataType::VARCHAR: join_algorithm.run<std::string>(); break;
-        }
-    }
+    // join key is always int32_t, so no need to check its type
+    join_algorithm.run();
+      
 
     // this is filled by the run<T> method
     return results;
 }
+
 
 ExecuteResult execute_scan(const Plan& plan, const ScanNode& scan,
     const std::vector<std::tuple<size_t, DataType>>& output_attrs) {
     
     auto table_id = scan.base_table_id;
     auto& input = plan.inputs[table_id];
-    return Table::copy_scan(input, output_attrs);
+    return my_copy_scan(input, output_attrs, static_cast<uint16_t>(table_id));
 }
 
 ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
@@ -233,32 +273,51 @@ ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {
     return std::visit( // visit: to determine node type : scan or join node
         [&](const auto& value) {
             using T = std::decay_t<decltype(value)>;
+
             if constexpr (std::is_same_v<T, JoinNode>) {
+
                 return execute_hash_join(plan, value, node.output_attrs);
-            } else {
+            } 
+            else {
                 return execute_scan(plan, value, node.output_attrs);
             }
         },
         node.data);
 }
 
+
+
 ColumnarTable execute(const Plan& plan, [[maybe_unused]] void* context) {
     namespace views = ranges::views;
-    auto ret        = execute_impl(plan, plan.root); // row-based table
-    
-    // output_attrs: vector of tuples of (column index, data type)
-    auto ret_types  = plan.nodes[plan.root].output_attrs
-                   
-                    // extracts only the data types
-                   | views::transform([](const auto& v) { return std::get<1>(v); })
-                   
-                   // converts the result to a vector<DataType> containing
-                   // just the types of the output vectors
-                   | ranges::to<std::vector<DataType>>();
-    
-                   Table table{std::move(ret), std::move(ret_types)};
+    auto& root_node = plan.nodes[plan.root];
 
-    return table.to_columnar();
+    return std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, JoinNode>) {
+                // Get left and right children as ExecuteResult
+                auto left = execute_impl(plan, value.left);
+                auto right = execute_impl(plan, value.right);
+                
+                // Join directly to columnar
+                return execute_root_hash_join(plan, value, left, right, root_node.output_attrs);
+            } 
+            else {
+                // Root is just a scan 
+                auto ret = execute_impl(plan, plan.root);
+                auto ret_types = plan.nodes[plan.root].output_attrs
+                               | views::transform([](const auto& v) { return std::get<1>(v); })
+                               | ranges::to<std::vector<DataType>>();
+                               
+                auto data_table = convert_to_Data(ret, plan);
+                
+                Table table{std::move(data_table), std::move(ret_types)};
+                
+                return table.to_columnar();
+            }
+        },
+        root_node.data);
 }
 
 void* build_context() {
