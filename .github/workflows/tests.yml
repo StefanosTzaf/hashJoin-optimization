@@ -1,0 +1,32 @@
+name: Run Tests
+
+on:
+  push:
+    branches: 
+      - "main"
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on:
+      group: k23a
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+        
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
+    
+    - name: Build
+      run: cmake --build build -- -j $(nproc) fast
+    
+    - name: unit_tests
+      run: ./build/unit_tests_unchained
+
+    - name: unit_tests_columnStore
+      run: ./build/unit_tests_columnStore
+
+    - name: unit_tests_unchained
+      run: ./build/unit_tests_unchained
