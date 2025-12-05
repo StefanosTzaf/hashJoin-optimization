@@ -1,6 +1,11 @@
 Eleftheria Galiatsatou 1115202200025
 Stefanos Tzaferis 1115202200183
 
+Parts implemented by each member:
+    - Late Materialization: both
+    - Column Store: Eleftheria Galiatsatou
+    - Hash table: Stefanos Tzaferis
+
 
 **Late Materialization**
 
