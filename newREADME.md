@@ -13,6 +13,11 @@ cmake --build build -- -j $(nproc) fast
 ./build/fast plans.json
 ```
 
+The final version of each part of the project has been tagged with git tags as follows:
+-   first part - Late Materialization: v2.1.0 (branch LateMaterialization)
+-   second part - Column Store: v2.2.0 (branch ColumnStore)
+-   third part - Hash Table: v2.3.0 (branch main)
+
 To run the tests:
 
 ```bash
@@ -110,3 +115,36 @@ The first 2 bytes (uint16_t) is the number of rows for each page(including nulls
 The rest is the data, which is consequtive value_t.
 
 **PART 3**
+
+
+### Hash Table Structure
+
+So as to implement the unchained hash table, we have created one struct Tuples 
+that holds the key-value pairs, and NOT the kev-vector<value> as in the chained hash table.
+Each pair key(int32_t) - value(size_t) is stored in a vector<Tuples> even if the key is the
+same, the hash table will handle it internally.
+Then we have created DirectoryEntry struct that has just one 64bit integer. As reffered
+in the paper, the first 48 bits are used tp save pointers to the buckets (pointer to the first Tuple)
+and the second 16 bits are used for the bloom filter. Also we have a static array of 2048 entries
+that is being computed only once and the most of its entries (1820) have exactly 4 bits set to 1.
+The hash table itself is implemented in the class UnchainedHashTable that has a vector of
+DirectoryEntry so as to have fast access to each bucket. It also has a vector<Tuples> that
+saves the real key-value pairs sorted by the hash prefix that we have set before (16 bits).
+There is also a temporary vector that saves the data before the build phase. And finally,
+there are 2 vectors for prefix counts and offsets for each prefix.
+
+
+### Hash Function
+As hash function we have used the hardware accelarated CRC32 _mm_crc32_u32 from <nmmintrin.h>
+library.
+
+### Build phase
+
+During the build phase, we first compute the prefixes and the ofsets that will be needed. Then we scatter the tuples into the
+buckets according to their prefixes and we update the bloom filter. 
+
+### Search phase
+In the search phase, for each key we find its bucket (DirectoryEntry) and
+then we check the bloom filter. If the bloom filter indicates that the maybe is present, we have to search linearly the bucket
+to find all the duplicates. If the bloom filter indicates that the key is definitely not present, we skip the bucket. Finally
+we return a vector<size_t> with all the values found for the given key.

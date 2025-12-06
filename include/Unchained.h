@@ -60,39 +60,7 @@ struct DirectoryEntry {
         setBloomFilter(bloom);
     }
 
-
-    // we initialize the bloom lookup table
-    static void initBloomLookup() {
-
-        // so as to be called only once even for different hash tables
-        // look up table is the same!
-        static bool initialized = false;
-        if (initialized){
-            return;
-        }
-        initialized = true;
-
-        std::vector<uint16_t> masks;
-        masks.reserve(1820);
-
-        // first 1820 4-bit patterns (C(16,4)) will be the real masks 
-        // all combinations have exactly 4 bits set as paper says
-        for (int a = 0; a < 16; a++)
-            for (int b = a + 1; b < 16; b++)
-                for (int c = b + 1; c < 16; c++)
-                    for (int d = c + 1; d < 16; d++)
-                        masks.push_back((1u<<a)|(1u<<b)|(1u<<c)|(1u<<d));
-
-        for (size_t i = 0; i < masks.size(); i++)
-            bloom_lookup[i] = masks[i];
-
-        // pad the rest to 2048 with random BUT with seed so as to be deterministic
-        // those entries do not have exactly 4 bits set but it's ok for our purpose
-        std::mt19937_64 rng(1234567);
-        for (size_t i = masks.size(); i < 2048; i++)
-            bloom_lookup[i] = (uint16_t)(rng() & 0xFFFF);
-    }
-
+    static void initBloomLookup();
 };
 
 
@@ -100,7 +68,6 @@ struct DirectoryEntry {
 class UnchainedHashTable {
 
     private:
-
         // directory entries
         std::vector<DirectoryEntry> directory;
 
@@ -120,128 +87,27 @@ class UnchainedHashTable {
         // for 16 bits we will have 2^16 directory entries , Hardcoded so as to be able to be changed to find the bestvalue
         static constexpr uint32_t PREFIX_BITS = 16;
         static constexpr uint32_t PREFIX_COUNT = 1u << PREFIX_BITS;
-
-
+        
+        
         inline uint32_t hash_prefix(int32_t key) {
             uint32_t h = _mm_crc32_u32(0, key);
             return h >> (32 - PREFIX_BITS);
         }
 
-        void count_prefixes() {
-            // initialize counts to zero
-            prefix_count.assign(PREFIX_COUNT, 0);
+        void count_prefixes();
 
-            for (const Tuple& t : temp_tuples) {
-                uint32_t prefix = hash_prefix(t.key);
-                prefix_count[prefix]++;
-            }
-        }
+        void compute_prefix_offsets();
 
-        // computes where each prefix starts in the final tuple buffer
-        void compute_prefix_offsets() {
-            prefix_offset.assign(PREFIX_COUNT, 0);
-
-            uint32_t running_sum = 0;
-            for (uint32_t i = 0; i < PREFIX_COUNT; i++) {
-                prefix_offset[i] = running_sum;
-                running_sum += prefix_count[i];
-            }
-
-            // resize final buffer to exact number of tuples
-            tuple_buffer.assign(running_sum, Tuple{});
-        }
+        void scatter_tuples();
         
-        // takes the real tuples and puts them in the final buffer in the right 
-        // position (that has been precomputed from previous functions)
-        void scatter_tuples() {
-            // create write pointers so as not to modify prefix_offset
-            std::vector<uint32_t> write_ptr = prefix_offset;
-
-            for (const Tuple& t : temp_tuples) {
-                uint32_t prefix = hash_prefix(t.key);
-                uint32_t pos = write_ptr[prefix];
-                // so as tuples with same prefix go to next position
-                tuple_buffer[pos] = t;
-                write_ptr[prefix]++;
-            }
-
-            // update directory entries
-            for (uint32_t i = 0; i < PREFIX_COUNT; i++) {
-                // Pointer to end of this bucket (even if count is 0)
-                Tuple* bucket_end = &tuple_buffer[prefix_offset[i] + prefix_count[i]];
-                
-                // Clear low 16 bits before storing pointer
-                uint64_t ptr_val = reinterpret_cast<uint64_t>(bucket_end) & 0xFFFFFFFFFFFF0000ULL;
-                
-                // Build bloom filter (only if bucket is non-empty)
-                uint16_t bloom = 0;
-                if (prefix_count[i] > 0) {
-                    for (uint32_t j = prefix_offset[i]; j < prefix_offset[i] + prefix_count[i]; j++) {
-                        bloom |= DirectoryEntry::bloom_lookup[DirectoryEntry::bloomTag(_mm_crc32_u32(0, (uint32_t)tuple_buffer[j].key))];
-                    }
-                }
-                
-                // Combine pointer and bloom
-                directory[i].data = ptr_val | bloom;
-            }
-        }
 
     public:
-        UnchainedHashTable(){
-            // compute one time the bloom lookup table
-            DirectoryEntry::initBloomLookup();
-            directory.resize(1 << PREFIX_BITS);
-            tuple_buffer.reserve(100000);
-        }
 
-        void insert(int32_t key, size_t row_id) {
-            uint32_t h = _mm_crc32_u32(0, key);
-            temp_tuples.emplace_back(key, row_id);
-        }
-        void build() {
-            count_prefixes();
-            compute_prefix_offsets();
-            scatter_tuples();
-            temp_tuples.clear();
-        }
+        UnchainedHashTable();
 
+        void insert(int32_t key, size_t row_id);
 
-std::vector<size_t> search(int32_t key) {
-    std::vector<size_t> results;
-    
-    // 1. Compute hash and get prefix (bucket)
-    uint32_t hash = _mm_crc32_u32(0, key);
-    uint32_t bucket = hash >> (32 - PREFIX_BITS);
-    
-    // 2. Check if bucket is empty first
-    if (prefix_count[bucket] == 0) {
-        return results;
-    }
-    
-    // 3. Get directory entry
-    uint64_t entry = directory[bucket].data;
-    
-    // 4. Check Bloom filter
-    uint16_t bloom_tag = DirectoryEntry::bloomTag(hash);
-    uint16_t bloom_mask = DirectoryEntry::bloom_lookup[bloom_tag];
-    uint16_t entry_bloom = (uint16_t)(entry & 0xFFFF);
-    
-    if ((entry_bloom & bloom_mask) != bloom_mask) {
-        return results;
-    }
-    
-    // 5. Get range using offset (more reliable than pointer arithmetic)
-    Tuple* start = &tuple_buffer[prefix_offset[bucket]];
-    Tuple* end = start + prefix_count[bucket];
-    
-    
-    // 6. Linear scan [start, end)
-    for (Tuple* cur = start; cur != end; ++cur) {
-        if (cur->key == key) {
-            results.push_back(cur->row_ids);
-        }
-    }
-    
-    return results;
-}
+        void build();
+
+        std::vector<size_t> search(int32_t key);
 };
