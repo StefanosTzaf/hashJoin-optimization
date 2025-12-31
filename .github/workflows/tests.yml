@@ -3,9 +3,9 @@ name: Run Tests
 on:
   push:
     branches: 
-      - "main"
+      - "indexing"
   pull_request:
-    branches: [ "main" ]
+    branches: [ "indexing" ]
 
 jobs:
   test:
