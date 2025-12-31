@@ -7,6 +7,7 @@ Parts implemented by each member:
     - Hash table: Stefanos Tzaferis
 
 ```bash
+/local-disk/sigmod25/make_links.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
 cmake --build build -- -j $(nproc) fast
 

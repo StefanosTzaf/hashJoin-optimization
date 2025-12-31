@@ -20,40 +20,6 @@ class ColumnT{
         // constructor
         ColumnT(DataType typeCol): type(typeCol), pages(), size(0), pageRowOffset(){}; 
 
-        // efficient move from Column NOT ColumnT
-        ColumnT(Column&& col): type(col.type), pages(std::move(col.pages)){
-
-            int sum = 0;
-            pageRowOffset.reserve(pages.size());
-
-            switch (col.type){
-                case DataType::INT32:
-
-                    for(Page* page: pages){
-
-                        uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
-                        pageRowOffset.push_back(sum);
-                        sum += numRows;
-                    }
-                    break;
-
-                case DataType::VARCHAR:
-                    for(Page* page: pages){
-                        
-                        uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
-                        if((numRows == 0xffff)|| (numRows == 0xfffe)){
-                            numRows = 0;
-                        }
-                        
-                        pageRowOffset.push_back(sum);
-                        sum += numRows;
-                    }
-                
-                    break;
-            }
-            size = sum;
-        }
-        
         // creates a new page, allocates memory for it and adds it to the vector
         Page* newPage();
 

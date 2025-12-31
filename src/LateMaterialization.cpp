@@ -375,8 +375,16 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                     case DataType::INT32: {
                         
                         auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
+                        auto num_values = *reinterpret_cast<uint16_t*>(page); // number of non-null values
                         auto* data_begin = reinterpret_cast<int32_t*>(page + 4); // data of int32 starts at offset 4
                         
+                        // case where we do not have any nulls at all
+                        // so we can avoid copying the whole page
+                        if(num_rows == num_values){
+
+                        }
+
+
                         // bitmap is at the end of the page
                         // indicates whether the corresponding row is null or not
                         auto* bitmap =
