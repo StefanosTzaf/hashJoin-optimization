@@ -360,6 +360,52 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
 
             ColumnT& column_t = results[column_idx]; // move from struct Column to ColumnT
 
+            
+            // check if INT32 column has nulls:
+            // if it does not have any nulls (dense column)
+            // for each page num_rows = num_values
+            bool hasNulls = false; // indicates wether the column is dense or not
+            
+            for (auto* page:
+                column.pages | views::transform([](auto* page) { return page->data; })) {
+                    
+                 // check data type of column: either INT32 or VARCHAR
+                switch (column.type) {
+
+                case DataType::INT32: {
+                                   
+                    auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
+                    auto num_values = *reinterpret_cast<uint16_t*>(page); // number of non-null values
+
+                    if(num_rows == num_values){
+                        // page is dense
+                    }
+                    else{
+                        hasNulls = true;
+                    }
+
+                    break;
+                }
+                
+                case DataType::VARCHAR: {
+                    break;
+                }
+                }
+
+                // exit the for loop since we already know
+                // the column is not dense
+                if(hasNulls == true){
+                    break;
+                }
+                    
+            }
+
+            // if the column is of type INT32 and is dense, don't copy it
+            if((column.type == DataType::INT32) && (hasNulls == false)){
+
+            }
+
+
             // create an inserter for each columnT
             ColumnTInserter inserter(column_t); 
             
@@ -377,13 +423,6 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                         auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
                         auto num_values = *reinterpret_cast<uint16_t*>(page); // number of non-null values
                         auto* data_begin = reinterpret_cast<int32_t*>(page + 4); // data of int32 starts at offset 4
-                        
-                        // case where we do not have any nulls at all
-                        // so we can avoid copying the whole page
-                        if(num_rows == num_values){
-
-                        }
-
 
                         // bitmap is at the end of the page
                         // indicates whether the corresponding row is null or not

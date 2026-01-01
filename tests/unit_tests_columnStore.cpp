@@ -193,3 +193,76 @@ TEST_CASE("Simple null insertion", "[ColumnStore]"){
 
 
 }
+
+
+
+TEST_CASE("Simple creation of ColumnT from Column INT32", "[ColumnStore]"){
+
+    Column column(DataType::INT32);
+    ColumnInserter<int32_t> inserter(column);
+
+    
+    for(int i = 0; i < 100; i++){
+        inserter.insert(i);     
+    }
+
+    size_t inserterRows = inserter.num_rows;
+    inserter.finalize();
+
+    const Column* col;
+    col = &column;
+    
+    ColumnT col_t(col);
+    
+    REQUIRE(col_t.isCopied() == false);
+    REQUIRE(col_t.getSize() == inserterRows);
+    REQUIRE(col_t.getType() == col->type);
+    REQUIRE(col_t.getNumPages() == col->pages.size());
+
+    const Page* pageOg = col->pages[0];
+    const Page* pageRef = col_t.getPage(0);
+
+    REQUIRE(pageOg == pageRef);
+
+    int32_t* val = (int32_t*)col_t.getValueAtRow(10);
+    REQUIRE(*val == 10);
+
+}
+
+
+TEST_CASE("creation of ColumnT from Column INT32 with multiple pages", "[ColumnStore]"){
+
+    Column column(DataType::INT32);
+    ColumnInserter<int32_t> inserter(column);
+
+    
+    for(int i = 0; i < 6000; i++){
+        inserter.insert(i);     
+    }
+
+    inserter.finalize();
+
+    const Column* col;
+    col = &column;
+    
+    ColumnT col_t(col);
+    
+    REQUIRE(col_t.isCopied() == false);
+    REQUIRE(col_t.getSize() == 6000);
+    REQUIRE(col_t.getType() == col->type);
+    REQUIRE(col_t.getNumPages() == col->pages.size());
+
+    const Page* pageOg = col->pages[0];
+    const Page* pageRef = col_t.getPage(0);
+
+    REQUIRE(pageOg == pageRef);
+
+    int32_t* val = (int32_t*)col_t.getValueAtRow(10);
+    REQUIRE(*val == 10);
+
+    val = (int32_t*)col_t.getValueAtRow(5500);
+    REQUIRE(*val == 5500);
+
+    val = (int32_t*)col_t.getValueAtRow(6000);
+    REQUIRE(val == NULL);
+}
