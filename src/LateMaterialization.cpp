@@ -54,22 +54,34 @@ struct RootJoinAlgorithm{
             
             ColumnT& keyColumn = left[left_col]; // extract the column with the key
             size_t  idx       = 0; // row index
-    
+
+
             // iterates over all pages of column with join key
             for (const Page* page: keyColumn.getPages()) {    
 
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
-                    
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+
+                    int32_t key;
+
+                    if(keyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row*sizeof(value_t));
                    
-                    if(val.is_null()){ // ingore null values
-                        idx++;
-                        continue;
+                        if(val.is_null()){ // ingore null values
+                            idx++;
+                            continue;
+                        }
+                       
+                        key = val.get_int();
                     }
-                   
-                    int32_t key = val.get_int();
+
+                    // take int32 value directly
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t)); 
+                    }
+                                       
                 
                     if (auto itr = hash_table.find(key); itr == hash_table.end()) {
                         // append idx to the appropriate vector of the hash table
@@ -95,14 +107,23 @@ struct RootJoinAlgorithm{
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
-                
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        right_idx++;
-                        continue;
+                  
+                    int32_t key;
+
+                    if(probeKeyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                        if(val.is_null()){
+                            right_idx++;
+                            continue;
+                        }
+                       
+                        key = val.get_int();
                     }
-                   
-                    int32_t key = val.get_int();
+
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
+                    }
                 
                     // for every matching key, find all matching build-side rows
                     if (auto itr = hash_table.find(key); itr != hash_table.end()) {
@@ -116,17 +137,32 @@ struct RootJoinAlgorithm{
                             // for each column index we want in the final result
                             for (auto [col_idx, _]: output_attrs) {
 
-                                value_t* val = NULL;
+                                void* val = NULL;
+                                bool copied = false;
 
                                 // if index < number of columns (wanted column is on left table)
                                 if (col_idx < left.size()) {
-                                    val = left[col_idx].getValueAt(left_idx);
+
+                                    val = left[col_idx].getValueAtRow(left_idx);     
+                                    if(left[col_idx].isCopied() == true){
+                                        copied = true;
+                                    }
                                 } 
                                 // wanted column is on right table
                                 else {
-                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                                    if(right[col_idx - left.size()].isCopied() == true){
+                                        copied = true;
+                                    }
                                 }
-                                inserters[output_col].insert(*val);
+                                //?????????????????????????????????????
+                                if(copied == true){
+
+                                    inserters[output_col].insert(*(value_t*)(val));
+                                }
+                                else{
+                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                }
                                 
                                 output_col++;
                             }
@@ -154,15 +190,24 @@ struct RootJoinAlgorithm{
 
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
+                int32_t key;
                 for(size_t row = 0; row < numRows; row++){
-                    
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        idx++;
-                        continue;
+
+                    if(keyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row*sizeof(value_t));
+                        if(val.is_null()){
+                            idx++;
+                            continue;
+                        }
+                       
+                        key = val.get_int();
                     }
-                   
-                    int32_t key = val.get_int();
+
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
+                    }
+                    
                 
                     if (auto itr = hash_table.find(key); itr == hash_table.end()) {
                         // append idx to the appropriate vector of the hash table
@@ -184,15 +229,23 @@ struct RootJoinAlgorithm{
 
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
+                int32_t key;
                 for(size_t row = 0; row < numRows; row++){
                     
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        left_idx++;
-                        continue;
+                    if(probeKeyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                        if(val.is_null()){
+                            left_idx++;
+                            continue;
+                        }
+                        
+                        key = val.get_int();               
                     }
-                    
-                    int32_t key = val.get_int();               
+
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
+                    }
     
 
                     if (auto itr = hash_table.find(key); itr != hash_table.end()) {
@@ -203,16 +256,34 @@ struct RootJoinAlgorithm{
                                         
                             for (auto [col_idx, _]: output_attrs) {
 
-                                value_t* val = NULL;
+                                void* val = NULL;
+                                bool copied = false;
                         
                                 if (col_idx < left.size()) {
-                                    val = left[col_idx].getValueAt(left_idx);
-                              } 
+                                    val = left[col_idx].getValueAtRow(left_idx);
+                                    
+                                    if(left[col_idx].isCopied() == true){
+                                        copied = true;
+                                    }
+                                } 
                                 else {
-                                    val = right[col_idx - left.size()].getValueAt(right_idx);
-                                }
+                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
 
-                                inserters[output_col].insert(*val);
+                                    if(right[col_idx - left.size()].isCopied() == true){
+                                        copied = true;
+                                    }
+                                }
+                                
+
+                                // ??????????????????????????????
+
+                                if(copied == true){
+
+                                    inserters[output_col].insert(*(value_t*)(val));
+                                }
+                                else{
+                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                }
                               
                                 output_col++;
                             }
@@ -338,6 +409,8 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
     std::vector<ColumnT> results;
     results.reserve((output_attrs.size()));
 
+    // initially create copied columns and each time a dense column is 
+    // met move Column to existing ColumnT
     for (auto [col_idx, data_type] : output_attrs) {
         results.emplace_back(data_type);
     }
@@ -358,66 +431,59 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
             size_t row_idx = 0;
             uint16_t page_idx = 0;
 
-            ColumnT& column_t = results[column_idx]; // move from struct Column to ColumnT
-
-            
+        
             // check if INT32 column has nulls:
             // if it does not have any nulls (dense column)
             // for each page num_rows = num_values
             bool hasNulls = false; // indicates wether the column is dense or not
-            
-            for (auto* page:
-                column.pages | views::transform([](auto* page) { return page->data; })) {
-                    
-                 // check data type of column: either INT32 or VARCHAR
-                switch (column.type) {
 
-                case DataType::INT32: {
-                                   
+            if(column.type == DataType::INT32){
+
+                for (auto* page:
+                    column.pages | views::transform([](auto* page) { return page->data; })) {
+                               
                     auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
-                    auto num_values = *reinterpret_cast<uint16_t*>(page); // number of non-null values
-
+                    auto num_values = *reinterpret_cast<uint16_t*>(page + 2); // number of non-null values
+                    
                     if(num_rows == num_values){
                         // page is dense
                     }
                     else{
                         hasNulls = true;
                     }
-
-                    break;
-                }
-                
-                case DataType::VARCHAR: {
-                    break;
-                }
-                }
-
-                // exit the for loop since we already know
-                // the column is not dense
-                if(hasNulls == true){
-                    break;
-                }
                     
+                    // exit the for loop since we already know
+                    // the column is not dense
+                    if(hasNulls == true){
+                        break;
+                    }
+                }
+
+                // if the column is dense, don't copy it
+                if(hasNulls == false){
+
+                    // move to existing ColumnT 
+                    results[column_idx] = ColumnT(&column);
+                    continue;
+                }
+
             }
 
-            // if the column is of type INT32 and is dense, don't copy it
-            if((column.type == DataType::INT32) && (hasNulls == false)){
-
-            }
-
-
+    
+            ColumnT& column_t = results[column_idx]; 
+            
             // create an inserter for each columnT
             ColumnTInserter inserter(column_t); 
-            
+                
             // iterate through all pages of the column
             for (auto* page:
                 column.pages | views::transform([](auto* page) { return page->data; })) {
+                    
+                ++page_idx;
+                    
+                // check data type of column: either INT32 or VARCHAR
+                switch (column.type) {
 
-                    ++page_idx;
-
-                    // check data type of column: either INT32 or VARCHAR
-                    switch (column.type) {
-    
                     case DataType::INT32: {
                         
                         auto  num_rows   = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
@@ -458,7 +524,7 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                         }
                         break;
                     }
-               
+                
                     case DataType::VARCHAR: {
                         auto num_rows = *reinterpret_cast<uint16_t*>(page); // first 2 bytes: number of rows
                         
@@ -469,7 +535,7 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                                 throw std::runtime_error("row_idx");
                             }
 
-                            value_t val = value_t::from_string_ref(table_id, static_cast<uint16_t>(in_col_idx), 
+                            value_t val = value_t::from_string_ref(table_id, (uint16_t)(in_col_idx), 
                                                         page_idx - 1, value_t::LONG_STR_TAG);
 
                             inserter.insert(val);
@@ -484,7 +550,7 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                         
                         // REGULAR string page
                         else {
-                                              
+                                                
                             auto* bitmap =
                                 reinterpret_cast<uint8_t*>(page + PAGE_SIZE - (num_rows + 7) / 8);          
                             
@@ -494,13 +560,13 @@ ExecuteResult my_copy_scan(const ColumnarTable& table,
                                 
                                 // if the i-th row is not null
                                 if (get_bitmap(bitmap, i)) {
-                                                  
+                                                    
                                     if (row_idx >= table.num_rows) {
                                         throw std::runtime_error("row_idx");
                                     }
 
                                     value_t val = value_t::from_string_ref(table_id, 
-                                        static_cast<uint16_t>(in_col_idx), page_idx - 1, data_idx);
+                                        (uint16_t)(in_col_idx), page_idx - 1, data_idx);
 
                                     inserter.insert(val);
 

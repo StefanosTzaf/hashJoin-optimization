@@ -30,7 +30,7 @@ struct JoinAlgorithm {
 
         for(size_t i = 0; i < output_attrs.size(); i++){
             DataType type = std::get<1>(output_attrs[i]);
-            results.emplace_back(std::move(ColumnT(type)));
+            results.emplace_back(type);
         }
 
         std::vector<ColumnTInserter> inserters;
@@ -57,13 +57,25 @@ struct JoinAlgorithm {
 
                 for(size_t row = 0; row < numRows; row++) {
                     
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        idx++;
-                        continue;
-                    }
+                    int32_t key;
                     
-                    int32_t key = val.get_int();
+                    if(keyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row*sizeof(value_t));
+                   
+                        if(val.is_null()){ // ingore null values
+                            idx++;
+                            continue;
+                        }
+                       
+                        key = val.get_int();
+                    }
+
+                    // take int32 value directly
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t)); 
+                    }
+                           
                     hash_table.insert(key, idx);  
     
                     idx++;
@@ -88,15 +100,24 @@ struct JoinAlgorithm {
                 const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
-                
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        right_idx++;
-                        continue;
+                    
+                    int32_t key;
+
+                    if(probeKeyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                        if(val.is_null()){
+                            right_idx++;
+                            continue;
+                        }
+                       
+                        key = val.get_int();
                     }
-                   
-                    int32_t key = val.get_int();
-                
+
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
+                    }
+                                
                     // for every matching key, find all matching build-side rows
                     matching_indices = hash_table.search(key);
 
@@ -109,22 +130,36 @@ struct JoinAlgorithm {
                             // for each column index we want in the final result
                             for (auto [col_idx, _]: output_attrs) {
 
-                                value_t* val = NULL;
+                                void* val = NULL;
+                                bool copied = false;
 
                                 // if index < number of columns (wanted column is on left table)
                                 if (col_idx < left.size()) {
-                                    val = left[col_idx].getValueAt(left_idx);
+                                    
+                                    val = left[col_idx].getValueAtRow(left_idx);     
+                                    if(left[col_idx].isCopied() == true){
+                                        copied = true;
+                                    }
                                 } 
                                 // wanted column is on right table
                                 else {
-                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                                    if(right[col_idx - left.size()].isCopied() == true){
+                                        copied = true;
+                                    }
                                 }
 
                                 if(val == NULL){
                                     continue;
                                 }
 
-                                inserters[output_col].insert(*val);
+                                if(copied == true){
+
+                                    inserters[output_col].insert(*(value_t*)(val));
+                                }
+                                else{
+                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                }
                                 
                                 output_col++;
                             }
@@ -150,15 +185,23 @@ struct JoinAlgorithm {
 
                 const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
+                int32_t key;
                 for(size_t row = 0; row < numRows; row++){
                     
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        idx++;
-                        continue;
+                    if(keyColumn.isCopied() == true){
+
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row*sizeof(value_t));
+                        if(val.is_null()){
+                            idx++;
+                            continue;
+                        }
+                       
+                        key = val.get_int();
                     }
-                    
-                    int32_t key = val.get_int();
+
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
+                    }
                 
                     hash_table.insert(key, idx);      
     
@@ -179,13 +222,20 @@ struct JoinAlgorithm {
 
                 for(size_t row = 0; row < numRows; row++){
                     
-                    const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
-                    if(val.is_null()){
-                        left_idx++;
-                        continue;
-                    }
+                    int32_t key;
                     
-                    int32_t key = val.get_int();               
+                    if(probeKeyColumn.isCopied() == true){
+                        const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
+                        if(val.is_null()){
+                            left_idx++;
+                            continue;
+                        }
+                        
+                        key = val.get_int();
+                    }
+                    else{
+                        key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
+                    }
     
 
                     matching_indices = hash_table.search(key);
@@ -196,16 +246,33 @@ struct JoinAlgorithm {
                                         
                             for (auto [col_idx, _]: output_attrs) {
 
-                                value_t* val = NULL;
+                                void* val = NULL;
+                                bool copied = false;
                         
                                 if (col_idx < left.size()) {
-                                    val = left[col_idx].getValueAt(left_idx);
+                                    val = left[col_idx].getValueAtRow(left_idx);
+                                    if(left[col_idx].isCopied() == true){
+                                        copied = true;
+                                    }
                               } 
                                 else {
-                                    val = right[col_idx - left.size()].getValueAt(right_idx);
+                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                                    if(right[col_idx - left.size()].isCopied() == true){
+                                        copied = true;
+                                    }
                                 }
 
-                                inserters[output_col].insert(*val);
+                                if(val == NULL){
+                                    continue;
+                                }
+
+                                if(copied == true){
+
+                                    inserters[output_col].insert(*(value_t*)(val));
+                                }
+                                else{
+                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                }
                                 output_col++;
                             }
 
@@ -262,7 +329,7 @@ ExecuteResult execute_scan(const Plan& plan, const ScanNode& scan,
     
     auto table_id = scan.base_table_id;
     auto& input = plan.inputs[table_id];
-    return my_copy_scan(input, output_attrs, static_cast<uint16_t>(table_id));
+    return my_copy_scan(input, output_attrs, (uint16_t)(table_id));
 }
 
 ExecuteResult execute_impl(const Plan& plan, size_t node_idx) {

@@ -21,7 +21,7 @@ class ColumnT{
 
     public:
         // constructor
-        ColumnT(DataType typeCol): type(typeCol), pages(), size(0), pageRowOffset(), copied(true){}; 
+        ColumnT(DataType typeCol): type(typeCol), pages(), size(0), pageRowOffset(), copied(true), colRef(NULL){}; 
 
         // construct ColumnT from Column for dense columns
         ColumnT(const Column* col): colRef(col), copied(false), pageRowOffset(), type(col->type){
@@ -149,6 +149,39 @@ class ColumnT{
                 }
             }
         }
+
+        // Move constructor: create ColumnT from existing one
+        ColumnT(ColumnT&& other): type(other.type), size(other.size), 
+            pages(std::move(other.pages)), pageRowOffset(std::move(other.pageRowOffset)), 
+            copied(other.copied), colRef(other.colRef) {
+
+                other.pages.clear();
+                other.pageRowOffset.clear();
+        }
+
+        // Move assignment: used in my_copy_scan to assign a Column to an already existing
+        // ColumnT that was constructed as a copied column 
+        ColumnT& operator=(ColumnT&& other){
+            
+            if(this != &other){
+
+                // deallocate memory only for copied pages
+                if(copied == true){
+                    for(Page* page : pages) {
+                        delete page;
+                    }
+                }
+                type = other.type;
+                size = other.size;
+                pages = std::move(other.pages);
+                pageRowOffset = std::move(other.pageRowOffset);
+                copied = other.copied;
+                colRef = other.colRef;
+
+            }
+            return *this;
+        }
+
 
         friend class ColumnTInserter;
         
