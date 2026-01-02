@@ -24,15 +24,16 @@ struct JoinAlgorithm {
     auto run() {
         namespace views = ranges::views;
 
-        // STEP 1: the hash table for joining: type of join key, vector of row indexes that contain the key: 
-        // one key might correspond to multiple rows
+        // STEP 1: the hash table for joining
         UnchainedHashTable hash_table;
 
+        // create a ColumnT for each output column based on type
         for(size_t i = 0; i < output_attrs.size(); i++){
             DataType type = std::get<1>(output_attrs[i]);
             results.emplace_back(type);
         }
 
+        // create an inserter for each output column
         std::vector<ColumnTInserter> inserters;
         inserters.reserve(output_attrs.size());
         for(int i = 0; i < output_attrs.size(); i++){
@@ -53,6 +54,7 @@ struct JoinAlgorithm {
             // iterates over all pages of column with join key
             for (const Page* page: keyColumn.getPages()) {    
 
+                // first 2 bytes is numRows in both page formats
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
@@ -83,6 +85,7 @@ struct JoinAlgorithm {
 
 
             }
+
             hash_table.build();
 
             // STEP 3 PROBE PHASE: take keys of right table, calculate hash value
@@ -121,49 +124,52 @@ struct JoinAlgorithm {
                     // for every matching key, find all matching build-side rows
                     matching_indices = hash_table.search(key);
 
-                        // for each matching left row index from
-                        // itr->second: the vector with row indices
-                        for (auto left_idx: matching_indices) {               
-                           
-                            size_t output_col = 0;
+                    // for each matching left row index 
+                    // keep only the desired columns
+                    for (auto left_idx: matching_indices) {               
+                        
+                        // index of column of result
+                        size_t output_col = 0;
 
-                            // for each column index we want in the final result
-                            for (auto [col_idx, _]: output_attrs) {
+                        // for each column index we want in the final result
+                        for (auto [col_idx, _]: output_attrs) {
 
-                                void* val = NULL;
-                                bool copied = false;
+                            void* val = NULL;
+                            bool copied = false;
 
-                                // if index < number of columns (wanted column is on left table)
-                                if (col_idx < left.size()) {
-                                    
-                                    val = left[col_idx].getValueAtRow(left_idx);     
-                                    if(left[col_idx].isCopied() == true){
-                                        copied = true;
-                                    }
-                                } 
-                                // wanted column is on right table
-                                else {
-                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
-                                    if(right[col_idx - left.size()].isCopied() == true){
-                                        copied = true;
-                                    }
-                                }
-
-                                if(val == NULL){
-                                    continue;
-                                }
-
-                                if(copied == true){
-
-                                    inserters[output_col].insert(*(value_t*)(val));
-                                }
-                                else{
-                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
-                                }
+                            // if index < number of columns (wanted column is on left table)
+                            if (col_idx < left.size()) {
+                                val = left[col_idx].getValueAtRow(left_idx);     
                                 
-                                output_col++;
+                                if(left[col_idx].isCopied() == true){
+                                    copied = true;
+                                }
+                            } 
+                            // wanted column is on right table
+                            else {
+                                val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                                
+                                if(right[col_idx - left.size()].isCopied() == true){
+                                    copied = true;
+                                }
                             }
+
+                            if(val == NULL){
+                                continue;
+                            }
+
+                            if(copied == true){
+
+                                inserters[output_col].insert(*(value_t*)(val));
+                            }
+                            // convert the int32_t to a value_t storing it
+                            else{
+                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                            }
+                            
+                            output_col++;
                         }
+                    }
 
                     right_idx++;
                 }
@@ -213,7 +219,6 @@ struct JoinAlgorithm {
             ColumnT& probeKeyColumn = left[left_col];
             size_t left_idx = 0; //row idx for left table
             
-            // Reuse vector to avoid allocations
             std::vector<size_t> matching_indices;
 
             for (const Page* page: probeKeyColumn.getPages()) {
@@ -240,43 +245,43 @@ struct JoinAlgorithm {
 
                     matching_indices = hash_table.search(key);
                         
-                        for (auto right_idx: matching_indices) {
+                    for (auto right_idx: matching_indices) {
 
-                            size_t output_col = 0;
-                                        
-                            for (auto [col_idx, _]: output_attrs) {
+                        size_t output_col = 0;
+                                    
+                        for (auto [col_idx, _]: output_attrs) {
 
-                                void* val = NULL;
-                                bool copied = false;
-                        
-                                if (col_idx < left.size()) {
-                                    val = left[col_idx].getValueAtRow(left_idx);
-                                    if(left[col_idx].isCopied() == true){
-                                        copied = true;
-                                    }
-                              } 
-                                else {
-                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
-                                    if(right[col_idx - left.size()].isCopied() == true){
-                                        copied = true;
-                                    }
+                            void* val = NULL;
+                            bool copied = false;
+                    
+                            if (col_idx < left.size()) {
+                                val = left[col_idx].getValueAtRow(left_idx);
+                                if(left[col_idx].isCopied() == true){
+                                    copied = true;
                                 }
-
-                                if(val == NULL){
-                                    continue;
+                            } 
+                            else {
+                                val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                                if(right[col_idx - left.size()].isCopied() == true){
+                                    copied = true;
                                 }
-
-                                if(copied == true){
-
-                                    inserters[output_col].insert(*(value_t*)(val));
-                                }
-                                else{
-                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
-                                }
-                                output_col++;
                             }
 
+                            if(val == NULL){
+                                continue;
+                            }
+
+                            if(copied == true){
+
+                                inserters[output_col].insert(*(value_t*)(val));
+                            }
+                            else{
+                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                            }
+                            output_col++;
                         }
+
+                    }
                     
                     left_idx++;
                 }
@@ -285,8 +290,6 @@ struct JoinAlgorithm {
         }
         
     }
-
-
 };
 
 

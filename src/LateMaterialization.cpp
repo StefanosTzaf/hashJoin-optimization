@@ -1,6 +1,7 @@
 #include <LateMaterialization.h>
 #include <iostream>
 #include "ColumnStore.h"
+#include <Unchained.h>
 
 
 static bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
@@ -21,24 +22,26 @@ struct RootJoinAlgorithm{
 
     auto run(){
         namespace views = ranges::views;
+        
+        // STEP 1: the hash table for joining
+        UnchainedHashTable hash_table;
 
-        // initialize results columns
+        // create a Column (not ColumnT) for each output column based on type
         for (auto [col_idx, data_type]: output_attrs) {
                 
-            results.columns.emplace_back(data_type); // add new column to columnarTable
+            results.columns.emplace_back(data_type); // add new Column to columnarTable
         }
 
-        
-        std::unordered_map<int32_t, std::vector<size_t>> hash_table;
-        
-        std::vector<ColumnT> tempResults; // temporary storage for joined columns
+        // temporary ColumnT storage for joined columns
+        std::vector<ColumnT> tempResults; 
         tempResults.reserve(output_attrs.size());
         for(size_t i = 0; i < output_attrs.size(); i++){
             DataType type = std::get<1>(output_attrs[i]);
             tempResults.emplace_back(type);
         }
         
-        std::vector<ColumnTInserter> inserters; // create an inserter for each column
+        // create an inserter for each columnT of tempResults
+        std::vector<ColumnTInserter> inserters; 
         inserters.reserve(output_attrs.size());
         for(int i = 0; i < output_attrs.size(); i++){
             DataType type = std::get<1>(output_attrs[i]);
@@ -59,6 +62,7 @@ struct RootJoinAlgorithm{
             // iterates over all pages of column with join key
             for (const Page* page: keyColumn.getPages()) {    
 
+                // first 2 bytes is numRows in both page formats
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
@@ -83,23 +87,21 @@ struct RootJoinAlgorithm{
                     }
                                        
                 
-                    if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                        // append idx to the appropriate vector of the hash table
-                        hash_table.emplace(key, std::vector<size_t>(1, idx));
-    
-                    // if not found, create new entry in hash table with idx
-                    } else {
-                        itr->second.push_back(idx);
-                    }         
+                    hash_table.insert(key,idx);      
     
                     idx++;
                 }
             }
 
+            hash_table.build();
+
             // PROBE PHASE
 
             ColumnT& probeKeyColumn = right[right_col]; // column with join key
             size_t right_idx = 0; //row index for right table
+
+            // Reuse vector to avoid allocations
+            std::vector<size_t> matching_indices;
            
             // iterate through all pages of column with join key
             for (const Page* page: probeKeyColumn.getPages()) {
@@ -124,50 +126,54 @@ struct RootJoinAlgorithm{
                     else{
                         key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
                     }
-                
+
                     // for every matching key, find all matching build-side rows
-                    if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                    matching_indices = hash_table.search(key);
 
-                        // for each matching left row index from
-                        // itr->second: the vector with row indices
-                        for (auto left_idx: itr->second) {               
-                           
-                            size_t output_col = 0;
+                    // for each matching left row index 
+                    // keep only the desired columns
+                    for (auto left_idx: matching_indices) {               
+                        
+                        size_t output_col = 0;
 
-                            // for each column index we want in the final result
-                            for (auto [col_idx, _]: output_attrs) {
+                        // for each column index we want in the final result
+                        for (auto [col_idx, _]: output_attrs) {
 
-                                void* val = NULL;
-                                bool copied = false;
+                            void* val = NULL;
+                            bool copied = false;
 
-                                // if index < number of columns (wanted column is on left table)
-                                if (col_idx < left.size()) {
+                            // if index < number of columns (wanted column is on left table)
+                            if (col_idx < left.size()) {
 
-                                    val = left[col_idx].getValueAtRow(left_idx);     
-                                    if(left[col_idx].isCopied() == true){
-                                        copied = true;
-                                    }
-                                } 
-                                // wanted column is on right table
-                                else {
-                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
-                                    if(right[col_idx - left.size()].isCopied() == true){
-                                        copied = true;
-                                    }
+                                val = left[col_idx].getValueAtRow(left_idx);     
+                                if(left[col_idx].isCopied() == true){
+                                    copied = true;
                                 }
-                                //?????????????????????????????????????
-                                if(copied == true){
-
-                                    inserters[output_col].insert(*(value_t*)(val));
+                            } 
+                            // wanted column is on right table
+                            else {
+                                val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                                if(right[col_idx - left.size()].isCopied() == true){
+                                    copied = true;
                                 }
-                                else{
-                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
-                                }
-                                
-                                output_col++;
                             }
+
+                            if(val == NULL){
+                                continue;
+                            }
+           
+                            if(copied == true){
+
+                                inserters[output_col].insert(*(value_t*)(val));
+                            }
+                            else{
+                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                            }
+                            
+                            output_col++;
                         }
                     }
+                    
                     right_idx++;
                 }
                 
@@ -208,22 +214,18 @@ struct RootJoinAlgorithm{
                         key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
                     }
                     
-                
-                    if (auto itr = hash_table.find(key); itr == hash_table.end()) {
-                        // append idx to the appropriate vector of the hash table
-                        hash_table.emplace(key, std::vector<size_t>(1, idx));
-    
-                    // if not found, create new entry in hash table with idx
-                    } else {
-                        itr->second.push_back(idx);
-                    }         
+                    hash_table.insert(key, idx);    
     
                     idx++;
                 }
             }
+         
+            hash_table.build();
 
             ColumnT& probeKeyColumn = left[left_col];
             size_t left_idx = 0; //row idx for left table
+
+            std::vector<size_t> matching_indices;
 
             for (const Page* page: probeKeyColumn.getPages()) {
 
@@ -246,70 +248,67 @@ struct RootJoinAlgorithm{
                     else{
                         key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t));
                     }
-    
 
-                    if (auto itr = hash_table.find(key); itr != hash_table.end()) {
+                    matching_indices = hash_table.search(key);
                         
-                        for (auto right_idx: itr->second) {
+                    for (auto right_idx: matching_indices) {
 
-                            size_t output_col = 0;
-                                        
-                            for (auto [col_idx, _]: output_attrs) {
-
-                                void* val = NULL;
-                                bool copied = false;
-                        
-                                if (col_idx < left.size()) {
-                                    val = left[col_idx].getValueAtRow(left_idx);
+                        size_t output_col = 0;
                                     
-                                    if(left[col_idx].isCopied() == true){
-                                        copied = true;
-                                    }
-                                } 
-                                else {
-                                    val = right[col_idx - left.size()].getValueAtRow(right_idx);
+                        for (auto [col_idx, _]: output_attrs) {
 
-                                    if(right[col_idx - left.size()].isCopied() == true){
-                                        copied = true;
-                                    }
-                                }
+                            void* val = NULL;
+                            bool copied = false;
+                    
+                            if (col_idx < left.size()) {
+                                val = left[col_idx].getValueAtRow(left_idx);
                                 
-
-                                // ??????????????????????????????
-
-                                if(copied == true){
-
-                                    inserters[output_col].insert(*(value_t*)(val));
+                                if(left[col_idx].isCopied() == true){
+                                    copied = true;
                                 }
-                                else{
-                                    inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                            } 
+                            else {
+                                val = right[col_idx - left.size()].getValueAtRow(right_idx);
+
+                                if(right[col_idx - left.size()].isCopied() == true){
+                                    copied = true;
                                 }
-                              
-                                output_col++;
                             }
 
+                            if(val == NULL){
+                                continue;
+                            }
+
+                            if(copied == true){
+
+                                inserters[output_col].insert(*(value_t*)(val));
+                            }
+                            else{
+                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                            }
+                            
+                            output_col++;
                         }
+
                     }
+                
                     left_idx++;
                 }
                 
             }
         }
 
-        // now that we have all columns in results (vector<ColumnT>)
-        // we need to fill the ColumnarTable with the materialized columns
+        // now that we have all columns in tempResults (vector<ColumnT>)
+        // we need to fill the ColumnarTable results with the materialized columns
         size_t output_col = 0;
 
         for (auto [col_idx, data_type]: output_attrs) {
 
             Column& column = results.columns[output_col];
 
-            // check data type of column
-
+            // check data type of column and create the appropriate inserter
             if(data_type == DataType::INT32){
                 ColumnInserter<int32_t> inserter(column);
-
-                size_t num_of_null_values = 0;
 
                 // iterate through all values of the column in tempResults
                 for(Page* page: tempResults[output_col].getPages()){
@@ -328,9 +327,13 @@ struct RootJoinAlgorithm{
                         }
                     }
                 }
+
+                // finalize inserter of current column
                 inserter.finalize();
             }
+
             else if(data_type == DataType::VARCHAR){
+
                 ColumnInserter<std::string> inserter(column);
 
                 for(Page* page: tempResults[output_col].getPages()){
@@ -398,7 +401,9 @@ ColumnarTable execute_root_hash_join(
 }
 
 
-// converts columnar table to vector<ColumnT>
+// converts columnar table to vector<ColumnT>:
+// creates a column reference for dense pages
+// and copies those with null values or varchar
 ExecuteResult my_copy_scan(const ColumnarTable& table,
      const std::vector<std::tuple<size_t, DataType>>& output_attrs, uint16_t table_id) {
     
@@ -603,39 +608,44 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
         uint16_t table_idx = v.tableIdx;
         uint16_t col_idx = v.columnIdx;
         uint16_t page_idx = v.pageIdx;
-        auto& column = table.columns[col_idx];
-        auto* page = column.pages[page_idx]->data;
+        const Column& column = table.columns[col_idx];
+        Page* page = column.pages[page_idx];
 
         if((v.dataIdx & value_t::TYPE_MASK) == value_t::LONG_STR_TAG){
-            size_t num_chars = *reinterpret_cast<uint16_t*>(page + 2);           
-            auto* data_begin = reinterpret_cast<char*>(page + 4);
+            
+            size_t num_chars = *reinterpret_cast<uint16_t*>(page->data + 2);           
+            auto* data_begin = reinterpret_cast<char*>(page->data + 4);
+
+            // create string with num_chars length
             std::string result(data_begin, data_begin + num_chars);
 
-
-            auto* next_page = column.pages[++page_idx]->data;
-            size_t type_of_next = *reinterpret_cast<uint16_t*>(next_page);
+            // take next page of long string
+            Page* next_page = column.pages[++page_idx];
+            size_t type_of_next = *reinterpret_cast<uint16_t*>(next_page->data);
+           
             while(type_of_next == 0xfffe){ // While we have more LONG string pages
 
                 // Now handle next page
-                size_t next_num_chars = *reinterpret_cast<uint16_t*>(next_page + 2);
-                auto* next_data_begin = reinterpret_cast<char*>(next_page + 4);
+                size_t next_num_chars = *reinterpret_cast<uint16_t*>(next_page->data + 2);
+                auto* next_data_begin = reinterpret_cast<char*>(next_page->data + 4);
+                
+                // append long string to existing string
                 result.append(next_data_begin, next_data_begin + next_num_chars);
 
-                next_page = column.pages[++page_idx]->data;
-                type_of_next = *reinterpret_cast<uint16_t*>(next_page);
+                next_page = column.pages[++page_idx];
+                type_of_next = *reinterpret_cast<uint16_t*>(next_page->data);
 
             }
             
             return result;
         }
         else{
-
             // Access the page and extract the string
             
             // the first 3 bits are set to 0 to get the data index
             auto idx = v.dataIdx & value_t::OFFSET_MASK;
-            auto  num_non_null = *reinterpret_cast<uint16_t*>(page + 2);
-            auto* offset_begin = reinterpret_cast<uint16_t*>(page + 4);
+            uint16_t  num_non_null = *reinterpret_cast<uint16_t*>(page->data + 2);
+            uint16_t* offset_begin = reinterpret_cast<uint16_t*>(page->data + 4);
     
             // this is where the string ends
             uint16_t offset = offset_begin[idx];       
@@ -647,8 +657,9 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
                 // and where the current string starts
                 prevOffset = offset_begin[idx-1];
             }
+
             // this is where the actual strings start
-            auto* data_begin = reinterpret_cast<char*>(page + 4 + num_non_null * 2);
+            auto* data_begin = reinterpret_cast<char*>(page->data + 4 + num_non_null * 2);
     
             // return the string by copying bytes from data_begin up to offset
             return std::string(data_begin + prevOffset, data_begin + offset);
