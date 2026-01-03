@@ -402,7 +402,7 @@ ColumnarTable execute_root_hash_join(
 
 
 // converts columnar table to vector<ColumnT>:
-// creates a column reference for dense pages
+// creates a column reference for dense columns
 // and copies those with null values or varchar
 ExecuteResult my_copy_scan(const ColumnarTable& table,
      const std::vector<std::tuple<size_t, DataType>>& output_attrs, uint16_t table_id) {
