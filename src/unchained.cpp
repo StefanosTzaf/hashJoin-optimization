@@ -40,7 +40,7 @@ void DirectoryEntry::initBloomLookup() {
 UnchainedHashTable::UnchainedHashTable(){
     // compute one time the bloom lookup table
     DirectoryEntry::initBloomLookup();
-    directory.resize(1 << PREFIX_BITS);
+    directory.resize(PREFIX_COUNT);
     tuple_buffer.reserve(100000);
 }
 
@@ -87,11 +87,12 @@ void UnchainedHashTable::scatter_tuples() {
     // update directory entries
     for (uint32_t i = 0; i < PREFIX_COUNT; i++) {
         // Pointer to end of this bucket (even if count is 0)
-        Tuple* bucket_end = &tuple_buffer[prefix_offset[i] + prefix_count[i]];
-        
-        // Clear low 16 bits before storing pointer
-        uint64_t ptr_val = reinterpret_cast<uint64_t>(bucket_end) & 0xFFFFFFFFFFFF0000ULL;
-        
+        Tuple* bucket_end = nullptr;
+        if (!tuple_buffer.empty()) {
+            // data returns pointer to first element, so we add offset + count to get end
+            bucket_end = tuple_buffer.data() + (prefix_offset[i] + prefix_count[i]);
+        }
+
         // Build bloom filter (only if bucket is non-empty)
         uint16_t bloom = 0;
         if (prefix_count[i] > 0) {
@@ -99,25 +100,25 @@ void UnchainedHashTable::scatter_tuples() {
                 bloom |= DirectoryEntry::bloom_lookup[DirectoryEntry::bloomTag(_mm_crc32_u32(0, (uint32_t)tuple_buffer[j].key))];
             }
         }
-        
-        // Combine pointer and bloom
-        directory[i].data = ptr_val | bloom;
+
+        // Combine pointer and bloom: pointer in upper bits, bloom in low 16 bits
+        directory[i].setPointer(bucket_end);
+        directory[i].setBloomFilter(bloom);
     }
 }
 
 
 std::vector<size_t> UnchainedHashTable::search(int32_t key) {
     std::vector<size_t> results;
-    
-    // 1. Compute hash and get prefix (bucket)
-    uint32_t hash = _mm_crc32_u32(0, key);
-    uint32_t bucket = hash >> (32 - PREFIX_BITS);
-    
-    // 2. Check if bucket is empty first
-    if (prefix_count[bucket] == 0) {
+
+    // 1. check if table is empty
+    if (tuple_buffer.empty()) {
         return results;
     }
     
+    // 2. Compute hash and get prefix (bucket)
+    uint32_t hash = _mm_crc32_u32(0, key);
+    uint32_t bucket = hash >> (32 - PREFIX_BITS);
     // 3. Get directory entry
     uint64_t entry = directory[bucket].data;
     
@@ -129,10 +130,15 @@ std::vector<size_t> UnchainedHashTable::search(int32_t key) {
     if ((entry_bloom & bloom_mask) != bloom_mask) {
         return results;
     }
-    
-    // 5. Get range using offset
-    Tuple* start = &tuple_buffer[prefix_offset[bucket]];
-    Tuple* end = start + prefix_count[bucket];
+
+    // 5. Get range using directory pointers (paper Figure 4) and NOT
+    // the offsets of arrays prefix_count and prefix_offset as before
+    Tuple* start = (bucket == 0) ? tuple_buffer.data() : directory[bucket - 1].getPointer();
+    Tuple* end = directory[bucket].getPointer();
+
+    if (start == end) {
+        return results;
+    }
     
     // 6. Linear scan [start, end)
     for (Tuple* cur = start; cur != end; ++cur) {

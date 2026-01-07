@@ -29,7 +29,7 @@ struct DirectoryEntry {
     
     // get the pointer (high 48 bits)
     inline Tuple* getPointer() const {
-        return reinterpret_cast<Tuple*>(data & 0xFFFFFFFFFFFF0000ULL);
+        return reinterpret_cast<Tuple*>(data >> 16);
     }
 
     
@@ -40,7 +40,7 @@ struct DirectoryEntry {
     
     inline void setPointer(Tuple* ptr) {
         uint64_t p = reinterpret_cast<uint64_t>(ptr);
-        data = (p & 0xFFFFFFFFFFFF0000ULL) | (data & 0xFFFF);
+        data = (p << 16) | (data & 0xFFFF);
     }
     
     inline void setBloomFilter(uint16_t bloom) {
