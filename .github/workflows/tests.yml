@@ -15,6 +15,20 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Cache specific cache folder
+      id: cache-fast-data
+      uses: actions/cache@v4
+      with:
+        path: cache
+        key: fast-cache-v1
+
+    - name: Download Prebuilt Cache
+      if: steps.cache-fast-data.outputs.cache-hit != 'true'
+      run: |
+        wget http://share.uoa.gr/protected/all-download/sigmod25/sigmod25_cache_x86.tar.gz
+        tar -xzf sigmod25_cache_x86.tar.gz -C .
+        rm sigmod25_cache_x86.tar.gz
         
     - name: Configure CMake
       run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
