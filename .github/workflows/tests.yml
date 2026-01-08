@@ -3,9 +3,9 @@ name: Run Tests
 on:
   push:
     branches: 
-      - "indexing"
+      - "parallel"
   pull_request:
-    branches: [ "indexing" ]
+    branches: [ "parallel" ]
 
 jobs:
   test:
@@ -30,3 +30,6 @@ jobs:
 
     - name: unit_tests_unchained
       run: ./build/unit_tests_unchained
+
+    - name: running_querries
+      run: ./build/fast plans.json

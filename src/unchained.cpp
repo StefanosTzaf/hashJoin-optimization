@@ -1,8 +1,9 @@
 #include "Unchained.h"
+#include <omp.h>
 
 
 std::array<uint16_t,2048> DirectoryEntry::bloom_lookup;
-
+#define NUMBER_OF_THREADS 8
 
 
 void DirectoryEntry::initBloomLookup() {
@@ -41,70 +42,8 @@ UnchainedHashTable::UnchainedHashTable(){
     // compute one time the bloom lookup table
     DirectoryEntry::initBloomLookup();
     directory.resize(PREFIX_COUNT);
-    tuple_buffer.reserve(100000);
-}
-
-void UnchainedHashTable::count_prefixes() {
-    // initialize counts to zero
-    prefix_count.assign(PREFIX_COUNT, 0);
-
-    for (const Tuple& t : temp_tuples) {
-        uint32_t prefix = hash_prefix(t.key);
-        prefix_count[prefix]++;
-    }
-}
-
-
-// computes where each prefix starts in the final tuple buffer
-void UnchainedHashTable::compute_prefix_offsets() {
-    prefix_offset.assign(PREFIX_COUNT, 0);
-
-    uint32_t running_sum = 0;
-    for (uint32_t i = 0; i < PREFIX_COUNT; i++) {
-        prefix_offset[i] = running_sum;
-        running_sum += prefix_count[i];
-    }
-
-    // resize final buffer to exact number of tuples
-    tuple_buffer.resize(running_sum);
-}
-
-
-// takes the real tuples and puts them in the final buffer in the right 
-// position (that has been precomputed from previous functions)
-void UnchainedHashTable::scatter_tuples() {
-    // create write pointers so as not to modify prefix_offset
-    std::vector<uint32_t> write_ptr = prefix_offset;
-
-    for (const Tuple& t : temp_tuples) {
-        uint32_t prefix = hash_prefix(t.key);
-        uint32_t pos = write_ptr[prefix];
-        // so as tuples with same prefix go to next position
-        tuple_buffer[pos] = t;
-        write_ptr[prefix]++;
-    }
-
-    // update directory entries
-    for (uint32_t i = 0; i < PREFIX_COUNT; i++) {
-        // Pointer to end of this bucket (even if count is 0)
-        Tuple* bucket_end = nullptr;
-        if (!tuple_buffer.empty()) {
-            // data returns pointer to first element, so we add offset + count to get end
-            bucket_end = tuple_buffer.data() + (prefix_offset[i] + prefix_count[i]);
-        }
-
-        // Build bloom filter (only if bucket is non-empty)
-        uint16_t bloom = 0;
-        if (prefix_count[i] > 0) {
-            for (uint32_t j = prefix_offset[i]; j < prefix_offset[i] + prefix_count[i]; j++) {
-                bloom |= DirectoryEntry::bloom_lookup[DirectoryEntry::bloomTag(_mm_crc32_u32(0, (uint32_t)tuple_buffer[j].key))];
-            }
-        }
-
-        // Combine pointer and bloom: pointer in upper bits, bloom in low 16 bits
-        directory[i].setPointer(bucket_end);
-        directory[i].setBloomFilter(bloom);
-    }
+    omp_set_num_threads(NUMBER_OF_THREADS);
+    local_data.resize(NUMBER_OF_THREADS);
 }
 
 
@@ -151,12 +90,107 @@ std::vector<size_t> UnchainedHashTable::search(int32_t key) {
 }
 
 void UnchainedHashTable::build() {
-    count_prefixes();
-    compute_prefix_offsets();
-    scatter_tuples();
-    temp_tuples.clear();
+    // 1. calculate partition sizes
+    // where each partition starts in the final tuple_buffer. (like prefix_offset and prefix_count before)
+    std::vector<size_t> partition_sizes(NUM_PARTITIONS, 0);
+    
+    // Sum up sizes from all threads for each partition
+    for (const auto& ld : local_data) {
+        for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
+            partition_sizes[p] += ld.partitions[p].size();
+        }
+    }
+
+    // 2. compute global offsets for each partition
+    std::vector<size_t> partition_offsets(NUM_PARTITIONS, 0);
+    size_t total_tuples = 0;
+    for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
+        partition_offsets[p] = total_tuples;
+        total_tuples += partition_sizes[p];
+    }
+    
+    // allocate final storage
+    tuple_buffer.resize(total_tuples); 
+    
+    // 3. parallel process partitions (Counting + Prefix Sum + Copy)
+    #pragma omp parallel for schedule(dynamic, 1) num_threads(NUMBER_OF_THREADS)
+    for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
+        // Range of directory entries covered by this partition
+        uint32_t shift = PREFIX_BITS - PARTITION_BITS;
+        uint32_t start_prefix = p << shift;
+        uint32_t end_prefix = (p + 1) << shift;
+        
+        // Step A: Count Tuples for each prefix - bucket and Build Bloom Filters
+        for (uint32_t i = start_prefix; i < end_prefix; ++i) {
+            directory[i].data = 0; 
+        }
+
+        // Iterate over all threads data for this partition but only this thread updates this position of directory
+        for (const auto& ld : local_data) {
+            const auto& vec = ld.partitions[p];
+            for (const auto& t : vec) {
+                uint32_t h = _mm_crc32_u32(0, t.key);
+                // take the exact prefix (bucket that this tuple belongs to)
+                uint32_t prefix = h >> (32 - PREFIX_BITS);
+                
+                // Store count in high bits (TEMPORARY we save the count of tuples here) - properly we have the pointer
+                uint64_t current_count = directory[prefix].data >> 16;
+                current_count++;
+
+                // low 16 bits bloom
+                uint16_t current_bloom = (uint16_t)(directory[prefix].data & 0xFFFF);
+                current_bloom |= DirectoryEntry::bloom_lookup[DirectoryEntry::bloomTag(h)];
+                
+                directory[prefix].data = (current_count << 16) | current_bloom;
+            }
+        }
+        
+        // Step B: Prefix Sum to determine Write Pointers
+        size_t current_offset = partition_offsets[p];
+        // .data() returns pointer to first element
+        Tuple* base_ptr = tuple_buffer.data();
+        
+        for (uint32_t i = start_prefix; i < end_prefix; ++i) {
+            // remember we saved count in highest 16 bits temporarily
+            uint64_t count = directory[i].data >> 16;
+            
+            // Set directory pointer to the START of the bucket
+            // We use this as a running write pointer in the next step
+            Tuple* bucket_write_ptr = base_ptr + current_offset;
+            directory[i].setPointer(bucket_write_ptr);
+            current_offset += count;
+        }
+        
+        // --- Step C: Copy Tuples ---
+        for (const auto& ld : local_data) {
+            const auto& vec = ld.partitions[p];
+            for (const auto& t : vec) {
+                // find the correct bucket - prefix
+                uint32_t h = _mm_crc32_u32(0, t.key);
+                uint32_t prefix = h >> (32 - PREFIX_BITS);
+                
+                // Get the current write pointer for this bucket
+                Tuple* target = directory[prefix].getPointer();
+                // Copy the tuple
+                *target = t;
+                
+                // Move write pointer forward at the end of the loop, directory[i] will point
+                // to the END of the bucket, which is what Search phase expects
+                directory[prefix].setPointer(target + 1);
+            }
+        }
+    }
+    
+    // now the real data are in tuple_buffer and directory pointers point to the end of each bucket in directory vector
+    local_data.clear();
 }
 
 void UnchainedHashTable::insert(int32_t key, size_t row_id) {
-    temp_tuples.emplace_back(key, row_id);
+    int tid = omp_get_thread_num();
+    if (tid >= local_data.size()) tid = 0; 
+    
+    uint32_t p = get_partition_id(key);
+    
+    // insert into the vector of the partition, no slab allocator yet
+    local_data[tid].partitions[p].emplace_back(key, row_id);
 }
