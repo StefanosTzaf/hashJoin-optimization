@@ -3,7 +3,6 @@
 
 
 std::array<uint16_t,2048> DirectoryEntry::bloom_lookup;
-#define NUMBER_OF_THREADS 8
 
 
 void DirectoryEntry::initBloomLookup() {

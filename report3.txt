@@ -1,0 +1,19 @@
+original:
+Total runtime: 60971 ms
+Total runtime: 60142 ms
+Total runtime: 61001 ms
+
+Indexing
+Total runtime: 39346 ms
+Total runtime: 39228 ms
+Total runtime: 39268 ms
+Total runtime: 39268 ms
+Total runtime: 39184 ms
+
+Parallel:
+1. Build phase
+Total runtime: 39743 ms
+Total runtime: 39848 ms
+Total runtime: 39681 ms
+Total runtime: 39613 ms
+Total runtime: 39693 ms

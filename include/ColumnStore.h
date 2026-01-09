@@ -83,6 +83,11 @@ class ColumnT{
             return pages;
         }
 
+        const std::vector<size_t>& getPageRowOffsets() const{
+
+            return pageRowOffset;
+        }
+
         // returns a pointer to the value_t in idx row
         inline value_t* getValueAt(size_t rowIdx) const{
             

@@ -49,10 +49,22 @@ struct JoinAlgorithm {
             }
 
             ColumnT& keyColumn = left[left_col]; // extract the column with the key
-            size_t  idx       = 0; // row index
+            
+            const std::vector<Page*>& pages = keyColumn.getPages();
+            size_t sizePages = pages.size();
+            
+            const std::vector<size_t>& pageRowOffsets = keyColumn.getPageRowOffsets();
+            
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
+            
+            //iterates over all pages of column with join key
+            for (size_t pageIdx = 0; pageIdx < sizePages; pageIdx++) { 
+                // for(const auto* page: keyColumn.getPages()){
+                    
+                // take local index of row for current page
+                size_t idx = pageRowOffsets[pageIdx]; 
 
-            // iterates over all pages of column with join key
-            for (const Page* page: keyColumn.getPages()) {    
+                const Page* page = keyColumn.getPage(pageIdx);
 
                 // first 2 bytes is numRows in both page formats
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
@@ -185,9 +197,19 @@ struct JoinAlgorithm {
             }
 
             ColumnT& keyColumn = right[right_col];
-            size_t idx = 0; // row index
-
-            for (const Page* page: keyColumn.getPages()) {
+            
+            const std::vector<Page*>& pages = keyColumn.getPages();
+            size_t sizePages = pages.size();
+            
+            const std::vector<size_t>& pageRowOffsets = keyColumn.getPageRowOffsets();
+            
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
+            
+            for(size_t pageIdx = 0; pageIdx < sizePages; pageIdx++){
+                // for (const Page* page: keyColumn.getPages()) {
+                    
+                size_t idx = pageRowOffsets[pageIdx]; // row index
+                const Page* page = keyColumn.getPage(pageIdx);
 
                 const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 

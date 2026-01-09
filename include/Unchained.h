@@ -6,6 +6,7 @@
 #include <iostream>
 #include <nmmintrin.h>
 
+#define NUMBER_OF_THREADS 8
 
 struct Tuple {
     int32_t key;
