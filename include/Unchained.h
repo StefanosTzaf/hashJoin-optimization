@@ -67,9 +67,12 @@ struct DirectoryEntry {
 // 3 bits = 8 partitions (1 per thread for 8 threads)
 static constexpr uint32_t PARTITION_BITS = 3; 
 static constexpr uint32_t NUM_PARTITIONS = 1u << PARTITION_BITS;
-// struct with partitions 
+
+// struct with all partitions for each thread
 struct ThreadLocalData {
+    
     std::vector<std::vector<Tuple>> partitions;
+  
     // each thread's Local data will be in different cache lines to avoid false sharing
     uint8_t padding[64]; 
 
@@ -94,6 +97,10 @@ class UnchainedHashTable {
         // to avoid synchronization during insertions
         std::vector<ThreadLocalData> local_data;
 
+        // this contains the merged partitions after the collection of the tuples
+        // in local_data: all partitions[0] of all threads, all partitions[1], etc
+        std::vector<std::vector<Tuple>> global_data;
+
         // how many bits will be used (from hash function output) for the directory indexing
         // for 16 bits we will have 2^16 directory entries , Hardcoded so as to be able to be changed to find the bestvalue
         static constexpr uint32_t PREFIX_BITS = 16;
@@ -105,8 +112,8 @@ class UnchainedHashTable {
         }
 
         inline uint32_t get_partition_id(int32_t key) {
-             uint32_t h = _mm_crc32_u32(0, key);
-             return h >> (32 - PARTITION_BITS);
+            uint32_t h = _mm_crc32_u32(0, key);
+            return h >> (32 - PARTITION_BITS);
         }
 
         void count_prefixes();
@@ -120,7 +127,11 @@ class UnchainedHashTable {
 
         UnchainedHashTable();
 
+        // inserts the tuple into the appropriate partition of the calling thread
         void insert(int32_t key, size_t row_id);
+
+        // merges all partitions[0], all partitions[1] etc into a single partition
+        void mergePartitions();
 
         void build();
 
