@@ -187,7 +187,10 @@ void UnchainedHashTable::build() {
 
 void UnchainedHashTable::insert(int32_t key, size_t row_id) {
     int tid = omp_get_thread_num();
-    if (tid >= local_data.size()) tid = 0; 
+    
+    if (tid >= local_data.size()){
+        tid = 0; 
+    }
     
     uint32_t p = get_partition_id(key);
     
