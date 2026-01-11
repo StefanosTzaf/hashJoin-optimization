@@ -95,6 +95,9 @@ void UnchainedHashTable::mergePartitions(){
 void UnchainedHashTable::build() {
 
     mergePartitions();
+
+    // stores the sizes of each partition
+    std::vector<size_t> partition_sizes(NUM_PARTITIONS, 0);
     
     // 1. compute global offsets for each partition
     // number of tuples till the start of each partition
@@ -103,6 +106,7 @@ void UnchainedHashTable::build() {
     size_t total_tuples = 0;
     for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
         partition_offsets[p] = total_tuples;
+        partition_sizes[p] = global_data[p].size();
         total_tuples += global_data[p].size();
     }
     

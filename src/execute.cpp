@@ -59,13 +59,10 @@ struct JoinAlgorithm {
             
             //iterates over all pages of column with join key
             for (size_t pageIdx = 0; pageIdx < sizePages; pageIdx++) { 
-                // for(const auto* page: keyColumn.getPages()){
                     
                 // take local index of row for current page
                 size_t idx = pageRowOffsets[pageIdx]; 
-
                 const Page* page = keyColumn.getPage(pageIdx);
-
                 // first 2 bytes is numRows in both page formats
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
@@ -206,11 +203,9 @@ struct JoinAlgorithm {
             #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
             
             for(size_t pageIdx = 0; pageIdx < sizePages; pageIdx++){
-                // for (const Page* page: keyColumn.getPages()) {
                     
                 size_t idx = pageRowOffsets[pageIdx]; // row index
                 const Page* page = keyColumn.getPage(pageIdx);
-
                 const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 int32_t key;

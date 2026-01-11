@@ -56,12 +56,20 @@ struct RootJoinAlgorithm{
             }
             
             ColumnT& keyColumn = left[left_col]; // extract the column with the key
-            size_t  idx       = 0; // row index
 
+            const std::vector<Page*>& pages = keyColumn.getPages();
+            size_t sizePages = pages.size();
+            
+            const std::vector<size_t>& pageRowOffsets = keyColumn.getPageRowOffsets();
 
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
+           
             // iterates over all pages of column with join key
-            for (const Page* page: keyColumn.getPages()) {    
+            for (size_t pageIdx = 0; pageIdx < sizePages; pageIdx++) { 
 
+                // take local index of row for current page
+                size_t idx = pageRowOffsets[pageIdx]; 
+                const Page* page = keyColumn.getPage(pageIdx);
                 // first 2 bytes is numRows in both page formats
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
@@ -190,10 +198,18 @@ struct RootJoinAlgorithm{
 
 
             ColumnT& keyColumn = right[right_col];
-            size_t idx = 0; // row index
+            
+            const std::vector<Page*>& pages = keyColumn.getPages();
+            size_t sizePages = pages.size();
+            
+            const std::vector<size_t>& pageRowOffsets = keyColumn.getPageRowOffsets();
+            
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
 
-            for (const Page* page: keyColumn.getPages()) {
+            for(size_t pageIdx = 0; pageIdx < sizePages; pageIdx++){
 
+                size_t idx = pageRowOffsets[pageIdx]; // row index
+                const Page* page = keyColumn.getPage(pageIdx);
                 uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 int32_t key;
@@ -672,43 +688,43 @@ Data valuet_to_Data(const value_t& v, const ColumnarTable& table) {
 //Convert ExecuteResult (value_t) to Table format (Data)
 std::vector<std::vector<Data>> convert_to_Data(const ExecuteResult& results, const Plan& plan) {
     
-    // std::vector<std::vector<Data>> data_results; // final result in Data format
-    // data_results.reserve(results.size());
+    std::vector<std::vector<Data>> data_results; // final result in Data format
+    data_results.reserve(results.size());
 
     
-    // for (const ColumnT& col: results) {
+    for (const ColumnT& col: results) {
         
-    //     std::vector<Data> data_row;
-    //     data_row.reserve(results.size());
+        std::vector<Data> data_row;
+        data_row.reserve(results.size());
         
-    //     for (Page* page: col.getPages()) {
+        for (Page* page: col.getPages()) {
             
-    //         uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
+            uint16_t numRows = *reinterpret_cast<uint16_t*>(page->data);
 
-    //         for(size_t i = 0; i < numRows; i++){
+            for(size_t i = 0; i < numRows; i++){
 
-    //             value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(numRows) + sizeof(value_t) * i);
+                value_t val = *reinterpret_cast<value_t*>(page->data + sizeof(numRows) + sizeof(value_t) * i);
               
-    //             if (val.is_null()) {
-    //                 data_row.emplace_back(std::monostate{});
-    //             } 
-    //             else if (val.is_int()) {
-    //                 data_row.emplace_back(val.get_int());
-    //             } 
-    //             else {
-    //                 // String materialization from value_t
-    //                 uint16_t table_idx = val.tableIdx;
-    //                 auto& table = plan.inputs[table_idx];
-    //                 Data data_value = valuet_to_Data(val, table); // convert value_t to Data
-    //                 data_row.emplace_back(std::move(data_value));
+                if (val.is_null()) {
+                    data_row.emplace_back(std::monostate{});
+                } 
+                else if (val.is_int()) {
+                    data_row.emplace_back(val.get_int());
+                } 
+                else {
+                    // String materialization from value_t
+                    uint16_t table_idx = val.tableIdx;
+                    auto& table = plan.inputs[table_idx];
+                    Data data_value = valuet_to_Data(val, table); // convert value_t to Data
+                    data_row.emplace_back(std::move(data_value));
     
-    //             }
-    //         }
+                }
+            }
 
-    //     }
+        }
         
-    //     data_results.emplace_back(std::move(data_row));
-    // }
+        data_results.emplace_back(std::move(data_row));
+    }
     
-    // return data_results;
+    return data_results;
 }
