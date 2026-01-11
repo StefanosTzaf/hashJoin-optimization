@@ -95,27 +95,21 @@ void UnchainedHashTable::mergePartitions(){
 void UnchainedHashTable::build() {
 
     mergePartitions();
-
-    // 1. calculate partition sizes
-    // where each partition starts in the final tuple_buffer. (like prefix_offset and prefix_count before)
-    std::vector<size_t> partition_sizes(NUM_PARTITIONS, 0);
     
-    for(size_t p = 0; p < NUM_PARTITIONS; p++){
-        partition_sizes[p] = global_data[p].size();
-    }
-    
-    // 2. compute global offsets for each partition
+    // 1. compute global offsets for each partition
+    // number of tuples till the start of each partition
+    // (like prefix_offset and prefix_count before)
     std::vector<size_t> partition_offsets(NUM_PARTITIONS, 0);
     size_t total_tuples = 0;
     for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
         partition_offsets[p] = total_tuples;
-        total_tuples += partition_sizes[p];
+        total_tuples += global_data[p].size();
     }
     
     // allocate final storage for all tuples
     tuple_buffer.resize(total_tuples); 
     
-    // 3. parallel process partitions (Counting + Prefix Sum + Copy)
+    // 2. parallel process partitions (Counting + Prefix Sum + Copy)
     #pragma omp parallel for schedule(dynamic, 1) num_threads(NUMBER_OF_THREADS)
     for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
         // Range of directory entries covered by this partition
