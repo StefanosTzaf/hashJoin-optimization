@@ -2,6 +2,7 @@
 #include <iostream>
 #include "ColumnStore.h"
 #include <Unchained.h>
+#include <omp.h>
 
 
 static bool get_bitmap(const uint8_t* bitmap, uint16_t idx) {
@@ -30,6 +31,30 @@ struct RootJoinAlgorithm{
         for (auto [col_idx, data_type]: output_attrs) {
                 
             results.columns.emplace_back(data_type); // add new Column to columnarTable
+        }
+
+        // vector with different table results for each thread
+        std::vector<std::vector<ColumnT>> threadResults(NUMBER_OF_THREADS);
+
+        // vector with inserters for each table of each thread
+        std::vector<std::vector<ColumnTInserter>> threadInserters(NUMBER_OF_THREADS);
+
+
+        for(size_t i = 0; i < NUMBER_OF_THREADS; i++){
+
+            threadResults[i].reserve(output_attrs.size());
+            threadInserters[i].reserve(output_attrs.size());
+            
+            for(size_t j = 0; j < output_attrs.size(); j++){
+                
+                DataType type = std::get<1>(output_attrs[j]);
+
+                //initialize columns
+                threadResults[i].emplace_back(type);
+
+                //initialize inserterts
+                threadInserters[i].emplace_back(threadResults[i][j]);
+            }
         }
 
         // temporary ColumnT storage for joined columns
@@ -106,15 +131,24 @@ struct RootJoinAlgorithm{
             // PROBE PHASE
 
             ColumnT& probeKeyColumn = right[right_col]; // column with join key
-            size_t right_idx = 0; //row index for right table
-
-            // Reuse vector to avoid allocations
-            std::vector<size_t> matching_indices;
-           
+          
+            const std::vector<Page*>& pagesProbe = probeKeyColumn.getPages();
+            const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
+            size_t probeSize = pagesProbe.size();
+            
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
+            
             // iterate through all pages of column with join key
-            for (const Page* page: probeKeyColumn.getPages()) {
+            for (size_t pageIdx = 0; pageIdx < probeSize; pageIdx++) {
+           
+                // each thread should have its own vector
+                std::vector<size_t> matching_indices;
                 
-                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
+                int threadId = omp_get_thread_num();
+                
+                const Page* page = probeKeyColumn.getPage(pageIdx);
+                size_t right_idx = pageProbeRowOffsets[pageIdx];
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
                   
@@ -172,10 +206,13 @@ struct RootJoinAlgorithm{
            
                             if(copied == true){
 
-                                inserters[output_col].insert(*(value_t*)(val));
+                                threadInserters[threadId][output_col].insert(*(value_t*)(val));
+                                // inserters[output_col].insert(*(value_t*)(val));
                             }
+                            // convert the int32_t to a value_t storing it
                             else{
-                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                threadInserters[threadId][output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                // inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
                             }
                             
                             output_col++;
@@ -239,17 +276,29 @@ struct RootJoinAlgorithm{
             hash_table.build();
 
             ColumnT& probeKeyColumn = left[left_col];
-            size_t left_idx = 0; //row idx for left table
+           
+            const std::vector<Page*>& pagesProbe = probeKeyColumn.getPages();
+            const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
+            size_t probeSize = pagesProbe.size();
+         
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
 
-            std::vector<size_t> matching_indices;
+            // iterate through all pages of column with join key
+            for (size_t pageIdx = 0; pageIdx < probeSize; pageIdx++) {
+               
+                // each thread should have its own vector
+                std::vector<size_t> matching_indices;
+               
+                int threadId = omp_get_thread_num();
+                
+                const Page* page = probeKeyColumn.getPage(pageIdx);
+                size_t left_idx = pageProbeRowOffsets[pageIdx];
+                const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
-            for (const Page* page: probeKeyColumn.getPages()) {
-
-                uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
-
-                int32_t key;
                 for(size_t row = 0; row < numRows; row++){
                     
+                    int32_t key;
+
                     if(probeKeyColumn.isCopied() == true){
 
                         const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row * sizeof(value_t));
@@ -296,11 +345,12 @@ struct RootJoinAlgorithm{
                             }
 
                             if(copied == true){
-
-                                inserters[output_col].insert(*(value_t*)(val));
+                                threadInserters[threadId][output_col].insert(*(value_t*)(val));
+                                // inserters[output_col].insert(*(value_t*)(val));
                             }
                             else{
-                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                threadInserters[threadId][output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                // inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
                             }
                             
                             output_col++;
@@ -311,6 +361,22 @@ struct RootJoinAlgorithm{
                     left_idx++;
                 }
                 
+            }
+        }
+
+        // now we have collected all local results and we need to merge them into one
+        // this will be done only by a single thread
+        for(size_t tid = 0; tid < NUMBER_OF_THREADS; tid++){
+
+            for(size_t col = 0; col < output_attrs.size(); col++){
+
+                ColumnT& localCol = threadResults[tid][col]; 
+                ColumnT& finalCol = tempResults[col];
+
+                for(Page* page: localCol.getPages()){
+
+                    inserters[col].insertPage(page);
+                }
             }
         }
 

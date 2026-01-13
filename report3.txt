@@ -20,7 +20,23 @@ Total runtime: 39272 ms
 
 M.O: 39257ms
 
+2. Probe phase
 
+-without late materialization
+Total runtime: 22645 ms
+Total runtime: 21080 ms
+Total runtime: 21269 ms
+Total runtime: 21255 ms
+Total runtime: 21076 ms
+
+- with parallel probe in late materialization (~ same)
+Total runtime: 21752 ms
+Total runtime: 21626 ms
+Total runtime: 22104 ms
+Total runtime: 21993 ms
+Total runtime: 21977 ms
+
+M.O: 21890 ms
 
 TODO:
 - slab allocator

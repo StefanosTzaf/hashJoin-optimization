@@ -362,7 +362,10 @@ struct JoinAlgorithm {
                 ColumnT& localCol = threadResults[tid][col]; 
                 ColumnT& finalCol = results[col];
 
-                
+                for(Page* page: localCol.getPages()){
+
+                    inserters[col].insertPage(page);
+                }
             }
         }
         
