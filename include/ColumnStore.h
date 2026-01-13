@@ -43,6 +43,9 @@ class ColumnT{
         // creates a new page, allocates memory for it and adds it to the vector
         Page* newPage();
 
+        // adds existing page to the vector
+        void addPage(Page* page);
+
         bool isCopied() const{
             return copied;
         }
@@ -217,6 +220,9 @@ class ColumnTInserter{
         
         // inserts a value_t in the last page or a new one if there is no space
         void insert(const value_t& val);
+
+        // inserts a whole page in the column
+        void insertPage(Page* page);
 
         // GETTERS
         const int getLastPageIdx() const{

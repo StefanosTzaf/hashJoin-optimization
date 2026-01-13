@@ -5,6 +5,7 @@
 #include "LateMaterialization.h"
 #include "ColumnStore.h"
 #include <Unchained.h>
+#include <omp.h>
 
 namespace Contest {
 
@@ -129,11 +130,15 @@ struct JoinAlgorithm {
             const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
             size_t probeSize = pagesProbe.size();
             
-            // Reuse vector to avoid allocations
-            std::vector<size_t> matching_indices;
-
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
+            
             // iterate through all pages of column with join key
             for (size_t pageIdx = 0; pageIdx < probeSize; pageIdx++) {
+           
+                // each thread should have its own vector
+                std::vector<size_t> matching_indices;
+                
+                int threadId = omp_get_thread_num();
                 
                 const Page* page = probeKeyColumn.getPage(pageIdx);
                 size_t right_idx = pageProbeRowOffsets[pageIdx];
@@ -197,11 +202,13 @@ struct JoinAlgorithm {
 
                             if(copied == true){
 
-                                inserters[output_col].insert(*(value_t*)(val));
+                                threadInserters[threadId][output_col].insert(*(value_t*)(val));
+                                // inserters[output_col].insert(*(value_t*)(val));
                             }
                             // convert the int32_t to a value_t storing it
                             else{
-                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                threadInserters[threadId][output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                // inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
                             }
                             
                             output_col++;
@@ -266,12 +273,16 @@ struct JoinAlgorithm {
             const std::vector<Page*>& pagesProbe = probeKeyColumn.getPages();
             const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
             size_t probeSize = pagesProbe.size();
-            
-            // Reuse vector to avoid allocations
-            std::vector<size_t> matching_indices;
+         
+            #pragma omp parallel for num_threads(NUMBER_OF_THREADS) 
 
             // iterate through all pages of column with join key
             for (size_t pageIdx = 0; pageIdx < probeSize; pageIdx++) {
+               
+                // each thread should have its own vector
+                std::vector<size_t> matching_indices;
+               
+                int threadId = omp_get_thread_num();
                 
                 const Page* page = probeKeyColumn.getPage(pageIdx);
                 size_t left_idx = pageProbeRowOffsets[pageIdx];
@@ -324,11 +335,12 @@ struct JoinAlgorithm {
                             }
 
                             if(copied == true){
-
-                                inserters[output_col].insert(*(value_t*)(val));
+                                threadInserters[threadId][output_col].insert(*(value_t*)(val));
+                                // inserters[output_col].insert(*(value_t*)(val));
                             }
                             else{
-                                inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                threadInserters[threadId][output_col].insert(value_t::from_int(*(int32_t*)(val)));
+                                // inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
                             }
                             output_col++;
                         }
@@ -337,6 +349,19 @@ struct JoinAlgorithm {
                     
                     left_idx++;
                 }
+                
+            }
+        }
+
+        // now we have collected all local results and we need to merge them into one
+        // this will be done only by a single thread
+        for(size_t tid = 0; tid < NUMBER_OF_THREADS; tid++){
+
+            for(size_t col = 0; col < output_attrs.size(); col++){
+
+                ColumnT& localCol = threadResults[tid][col]; 
+                ColumnT& finalCol = results[col];
+
                 
             }
         }
