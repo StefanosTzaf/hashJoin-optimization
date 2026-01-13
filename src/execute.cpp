@@ -27,6 +27,29 @@ struct JoinAlgorithm {
         // STEP 1: the hash table for joining
         UnchainedHashTable hash_table;
 
+        // vector with different table results for each thread
+        std::vector<std::vector<ColumnT>> threadResults(NUMBER_OF_THREADS);
+
+        // vector with inserters for each table of each thread
+        std::vector<std::vector<ColumnTInserter>> threadInserters(NUMBER_OF_THREADS);
+
+        for(size_t i = 0; i < NUMBER_OF_THREADS; i++){
+
+            threadResults[i].reserve(output_attrs.size());
+            threadInserters[i].reserve(output_attrs.size());
+            
+            for(size_t j = 0; j < output_attrs.size(); j++){
+                
+                DataType type = std::get<1>(output_attrs[j]);
+
+                //initialize columns
+                threadResults[i].emplace_back(type);
+
+                //initialize inserterts
+                threadInserters[i].emplace_back(threadResults[i][j]);
+            }
+        }
+
         // create a ColumnT for each output column based on type
         for(size_t i = 0; i < output_attrs.size(); i++){
             DataType type = std::get<1>(output_attrs[i]);
