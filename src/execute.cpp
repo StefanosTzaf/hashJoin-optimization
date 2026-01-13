@@ -101,14 +101,19 @@ struct JoinAlgorithm {
             // and if it exists store it in temp_results (vector of columns)
 
             ColumnT& probeKeyColumn = right[right_col]; // column with join key
-            size_t right_idx = 0; //row index for right table
+
+            const std::vector<Page*>& pagesProbe = probeKeyColumn.getPages();
+            const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
+            size_t probeSize = pagesProbe.size();
             
             // Reuse vector to avoid allocations
             std::vector<size_t> matching_indices;
 
             // iterate through all pages of column with join key
-            for (const Page* page: probeKeyColumn.getPages()) {
+            for (size_t pageIdx = 0; pageIdx < probeSize; pageIdx++) {
                 
+                const Page* page = probeKeyColumn.getPage(pageIdx);
+                size_t right_idx = pageProbeRowOffsets[pageIdx];
                 const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++) {
@@ -234,12 +239,19 @@ struct JoinAlgorithm {
             hash_table.build();
 
             ColumnT& probeKeyColumn = left[left_col];
-            size_t left_idx = 0; //row idx for left table
+
+            const std::vector<Page*>& pagesProbe = probeKeyColumn.getPages();
+            const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
+            size_t probeSize = pagesProbe.size();
             
+            // Reuse vector to avoid allocations
             std::vector<size_t> matching_indices;
 
-            for (const Page* page: probeKeyColumn.getPages()) {
-
+            // iterate through all pages of column with join key
+            for (size_t pageIdx = 0; pageIdx < probeSize; pageIdx++) {
+                
+                const Page* page = probeKeyColumn.getPage(pageIdx);
+                size_t left_idx = pageProbeRowOffsets[pageIdx];
                 const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
 
                 for(size_t row = 0; row < numRows; row++){
