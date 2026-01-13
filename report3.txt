@@ -38,6 +38,13 @@ Total runtime: 21977 ms
 
 M.O: 21890 ms
 
+αυτα τα ετρεξα αργοτερα που δεν ειχε τοσο κοσμο (πιο εγκυρα)
+Total runtime: 19433 ms
+Total runtime: 19534 ms
+Total runtime: 19526 ms
+Total runtime: 19493 ms
+
+
 TODO:
 - slab allocator
 - directory[-1]:

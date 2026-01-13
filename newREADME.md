@@ -217,6 +217,43 @@ its row index (the row whose columns we want in the final result of join)
 This function returns a void* so it can represent both a value_t or an 
 int32 for dense columns.  
 
-                    
+**Build Parallelization**                    
+
+
+**Probe Parallelization**
+The parallelization of the probe phase consists of two main structures:
+
+```C++
+std::vector<std::vector<ColumnT>> threadResults(NUMBER_OF_THREADS);
+std::vector<std::vector<ColumnTInserter>> threadInserter(NUMBER_OF_THREADS);
+```
+
+The first is basically a vector with NUMBER_OF_THREADS "tables". These
+tables (which are vector<ColumnT> as before) hold the local results of each
+thread. Basically, during the probe phase each thread is responsible for
+different pages of the column that holds the key in the probe-side table.  
+While, processing those pages for each key, it finds the matching build-side
+rows and stores the values of the desired columns(from output_attrs) into
+the appropriate column of the calling thread. This is done by all threads
+with this instruction:
+
+```C++
+threadInserters[threadId][output_col].insert()
+```
+The second structure holds the inserter for each column of each thread.
+
+After processing all pages, each thread has now gathered its own 
+intermediate results which need to be merged into a single vector<ColumnT>
+table. The merging is being done only by one single thread, which iterates
+through all local columns of each thread and directly inserts their pages
+into the final results table. The logic for the top-level hash join is the 
+same, with the only difference being that the results table is then
+converted into a ColumnarTable format.
+
+The ColumnStore format that we have implemented, has now a new method 
+which stores directly to the vector of pages of the column the input page.
+```C++ 
+void insertPage(Page* page); 
+```
 
 
