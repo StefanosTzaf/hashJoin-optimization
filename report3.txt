@@ -44,6 +44,11 @@ Total runtime: 19534 ms
 Total runtime: 19526 ms
 Total runtime: 19493 ms
 
+after work stealing
+Total runtime: 17726 ms
+Total runtime: 17766 ms
+Total runtime: 17660 ms
+Total runtime: 17741 ms
 
 TODO:
 - slab allocator
