@@ -1,16 +1,15 @@
+
 #include <cstdint>
 #include <vector>
-#include <cstring>
-#include <random>
 #include <array>
-#include <iostream>
 #include <nmmintrin.h>
+#include <random>
+#include "slab.h"
 
-#define NUMBER_OF_THREADS 8
+
 
 struct Tuple {
     int32_t key;
-    // row id not in a vector 
     size_t row_ids;
     
     Tuple() : key(0), row_ids(0) {}
@@ -64,43 +63,26 @@ struct DirectoryEntry {
     static void initBloomLookup();
 };
 
-// parallel build structures
-// 3 bits = 8 partitions (1 per thread for 8 threads)
-static constexpr uint32_t PARTITION_BITS = 3; 
-static constexpr uint32_t NUM_PARTITIONS = 1u << PARTITION_BITS;
 
-// struct with all partitions for each thread
-struct ThreadLocalData {
-    
-    std::vector<std::vector<Tuple>> partitions;
-  
-    // each thread's Local data will be in different cache lines to avoid false sharing
-    uint8_t padding[64]; 
 
-    ThreadLocalData() {
-        partitions.resize(NUM_PARTITIONS);
-    }
-};
 
 // Unchained Hash Table Class , (all the logic inside, directory entries that contain bloom filters and pointers to tuples)
 class UnchainedHashTable {
 
     private:
+
+        // local partitions per thread (slab allocator)
+        ThreadLocalTupleCollector local_partitions[NUMBER_OF_THREADS];
+        
+        // global allocator
+        GlobalAllocator global_allocator;
+
+        // final contiguous storage
+        Tuple* final_storage;
+        size_t total_tuples;
+
         // directory entries
         std::vector<DirectoryEntry> directory;
-
-        // Tuple storage: sorted by key (TODO do we need Paginated?)
-        std::vector<Tuple> tuple_buffer;
-        
-
-        // first position has the partitions for the first thread, second for the second thread, etc
-        // in logic level wehave 8 NUMBER_OF_THREADS partitions, but each thread has its own local sub-partitions 
-        // to avoid synchronization during insertions
-        std::vector<ThreadLocalData> local_data;
-
-        // this contains the merged partitions after the collection of the tuples
-        // in local_data: all partitions[0] of all threads, all partitions[1], etc
-        std::vector<std::vector<Tuple>> global_data;
 
         // how many bits will be used (from hash function output) for the directory indexing
         // for 16 bits we will have 2^16 directory entries , Hardcoded so as to be able to be changed to find the bestvalue
@@ -125,10 +107,10 @@ class UnchainedHashTable {
         
 
     public:
+        // as reffered in the paper, 4 MB large chunk, 256 KB small chunk
+        UnchainedHashTable(size_t large_chunk_bytes = 1 << 22, size_t small_chunk_bytes = 1 << 18);
 
-        UnchainedHashTable();
-
-        // inserts the tuple into the appropriate partition of the calling thread
+        // insert tuple for current thread
         void insert(int32_t key, size_t row_id);
 
         // merges all partitions[0], all partitions[1] etc into a single partition

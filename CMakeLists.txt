@@ -81,6 +81,7 @@ set(COMMON_SOURCES
     src/csv_parser.cpp
     src/statement.cpp
     src/LateMaterialization.cpp
+    src/slab.cpp
     src/ColumnStore.cpp
     src/unchained.cpp
 )
