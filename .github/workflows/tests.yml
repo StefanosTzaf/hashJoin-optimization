@@ -3,9 +3,9 @@ name: Run Tests
 on:
   push:
     branches: 
-      - "parallel"
+      - "parallelProbe"
   pull_request:
-    branches: [ "parallel" ]
+    branches: [ "parallelProbe" ]
 
 jobs:
   test:
