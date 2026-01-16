@@ -6,10 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(OpenMP REQUIRED)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-
 Include(FetchContent)
 
 FetchContent_Declare(
@@ -120,17 +116,17 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # Exclude fast targets from default 'all' build; build via explicit target 'fast'
     add_executable(build_cache EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
 
-    add_executable(fast EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
+    add_executable(leaderboard EXCLUDE_FROM_ALL ${COMMON_SOURCES} ${BASE_ENGINE} tests/read_sql.cpp)
 
 
     # Ensure 'cmake --build ... fast' builds all fast executables including all unit tests
-    add_dependencies(fast unit_tests unit_tests_columnStore unit_tests_unchained)
+    add_dependencies(leaderboard unit_tests unit_tests_columnStore unit_tests_unchained)
 
     target_link_libraries(build_cache PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
     target_compile_definitions(build_cache PRIVATE TEAMOPT_USE_DUCKDB TEAMOPT_BUILD_CACHE)
-    target_link_libraries(fast PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser)
+    target_link_libraries(leaderboard PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser)
     target_include_directories(build_cache PRIVATE include)
-    target_include_directories(fast PRIVATE include)
+    target_include_directories(leaderboard PRIVATE include)
 endif()
 
 target_link_libraries(run PRIVATE re2 fmt range-v3 nlohmann_json::nlohmann_json sqlparser duckdb)
