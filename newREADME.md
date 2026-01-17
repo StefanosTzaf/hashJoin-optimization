@@ -7,6 +7,7 @@ Parts implemented by each member:
     - Hash table: Stefanos Tzaferis
 
 ```bash
+/local-disk/sigmod25/make_links.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
 cmake --build build -- -j $(nproc) fast
 
@@ -25,6 +26,8 @@ To run the tests:
 ./build/unit_tests_unchained
 ./build/unit_tests_columnStore
 ```
+
+[2ND-PART]
 
 
 **Late Materialization**
@@ -114,8 +117,8 @@ Each page is the same for both INT32 and VARCHAR values, since it holds value_t.
 The first 2 bytes (uint16_t) is the number of rows for each page(including nulls).
 The rest is the data, which is consequtive value_t.
 
-**PART 3**
 
+**Hash Table**
 
 ### Hash Table Structure
 
@@ -148,3 +151,109 @@ In the search phase, for each key we find its bucket (DirectoryEntry) and
 then we check the bloom filter. If the bloom filter indicates that the maybe is present, we have to search linearly the bucket
 to find all the duplicates. If the bloom filter indicates that the key is definitely not present, we skip the bucket. Finally
 we return a vector<size_t> with all the values found for the given key.
+
+
+[3RD-PART]
+
+**Index optimization**
+
+ColumnT has now two extra fields: 
+```C++
+class ColumnT{
+    DataType type; // type of column
+    size_t size; // number of elements (+null)
+    std::vector<Page*> pages;
+    std::vector<size_t> pageRowOffset; // a vector holding the number of offset rows till each page
+
+    bool copied; // if copied = true, column is not dense
+    const Column* colRef; // if copied = false, colRef points to the original Column
+
+};
+```
+
+- copied is a boolean variable that indicates whether or not 
+a column is dense, meaning it is of Datatype INT32 and has no nulls.
+
+- colRef represents the column if copied == false. In this case the dense
+column is not copied and basically the ColumnT created points to the
+original Column of the ColumnarTable. In this way, every information 
+or data needed for the column is accessed through the Column struct
+and its own Page format.
+
+The discrimination between dense columns and those including null values
+is implemented in [my_copy_scan()] function. When iterating through the
+columns of the ColumnarTable to be processed, we first need to check
+whether the current column is INT32 and has NULLS. This is feasible,
+by iterating through the pages and comparing the first two uint16_t
+numbers of each page. If they are equal, the page does not have any
+NULL values at all. If this is true for all pages it means the column is dense. 
+In that case, the corresponding ColumnT representing that dense column 
+will be marked with copied = false and a reference to the original column 
+will be created. For every other page which is not dense, the function 
+proceeds with the copying of the column to a ColumnT as before.
+
+During the join algorithm, both the build and probing phase need 
+to distinguish when an ExecuteResult table has dense columns or not.
+This is implemented, by checking the value of the copied boolean. In
+this way, when the current column is a dense one (thus copied = false)
+the value can be obtained directly by accessing the original Page format.
+
+```C++
+ key = *reinterpret_cast<const int32_t*>(page->data + 2*sizeof(uint16_t) + row*sizeof(int32_t)); 
+ ```
+
+On the other hand, columns that contain NULL values obviously hold value_t
+which can be accessed by:
+
+```C++
+const value_t& val = *reinterpret_cast<const value_t*>(page->data + sizeof(uint16_t) + row*sizeof(value_t));
+key = val.get_int();
+                   
+```
+
+During the probe phase, to obtain the value of a certain column through 
+its row index (the row whose columns we want in the final result of join) 
+[getValueAtRow()] is used.
+This function returns a void* so it can represent both a value_t or an 
+int32 for dense columns.  
+
+**Build Parallelization**                    
+
+
+**Probe Parallelization**
+The parallelization of the probe phase consists of two main structures:
+
+```C++
+std::vector<std::vector<ColumnT>> threadResults(NUMBER_OF_THREADS);
+std::vector<std::vector<ColumnTInserter>> threadInserter(NUMBER_OF_THREADS);
+```
+
+The first is basically a vector with NUMBER_OF_THREADS "tables". These
+tables (which are vector<ColumnT> as before) hold the local results of each
+thread. Basically, during the probe phase each thread is responsible for
+different pages of the column that holds the key in the probe-side table.  
+While, processing those pages for each key, it finds the matching build-side
+rows and stores the values of the desired columns(from output_attrs) into
+the appropriate column of the calling thread. This is done by all threads
+with this instruction:
+
+```C++
+threadInserters[threadId][output_col].insert()
+```
+The second structure holds the inserter for each column of each thread.
+
+After processing all pages, each thread has now gathered its own 
+intermediate results which need to be merged into a single vector<ColumnT>
+table. The merging is being done only by one single thread, which iterates
+through all local columns of each thread and directly inserts their pages
+into the final results table. The logic for the top-level hash join is the 
+same, with the only difference being that the results table is then
+converted into a ColumnarTable format.
+
+The ColumnStore format that we have implemented, has now a new method 
+which stores directly to the vector of pages of the column the input page.
+```C++ 
+void insertPage(Page* page); 
+```
+
+

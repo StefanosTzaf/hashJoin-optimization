@@ -194,47 +194,200 @@ TEST_CASE("Simple null insertion", "[ColumnStore]"){
 
 }
 
-TEST_CASE("Creation of ColumnT from Column", "[ColumnStore]"){
+
+
+TEST_CASE("Simple creation of ColumnT from Column INT32", "[ColumnStore]"){
 
     Column column(DataType::INT32);
     ColumnInserter<int32_t> inserter(column);
+
     
-    REQUIRE(column.pages.size() == 0);
-    
-    inserter.insert(10);
-    inserter.insert(20);
-    inserter.insert(30);
+    for(int i = 0; i < 100; i++){
+        inserter.insert(i);     
+    }
+
+    size_t inserterRows = inserter.num_rows;
     inserter.finalize();
-    REQUIRE(column.pages.size() == 1);
 
-    ColumnT col_t(std::move(column));
+    const Column* col;
+    col = &column;
     
+    ColumnT col_t(col);
+    
+    REQUIRE(col_t.isCopied() == false);
+    REQUIRE(col_t.getSize() == inserterRows);
+    REQUIRE(col_t.getType() == col->type);
+    REQUIRE(col_t.getNumPages() == col->pages.size());
 
-    REQUIRE(col_t.getType() == DataType::INT32);
-    REQUIRE(col_t.getNumPages() == 1);
-    REQUIRE(col_t.getSize() == 3);
+    const Page* pageOg = col->pages[0];
+    const Page* pageRef = col_t.getPage(0);
+
+    REQUIRE(pageOg == pageRef);
+
+    int32_t* val = (int32_t*)col_t.getValueAtRow(10);
+    REQUIRE(*val == 10);
+
 }
 
-TEST_CASE("Creation of columnT from Column with multiple pages", "[Columnstore]"){
+
+TEST_CASE("creation of ColumnT from Column INT32 with multiple pages", "[ColumnStore]"){
 
     Column column(DataType::INT32);
     ColumnInserter<int32_t> inserter(column);
 
-    size_t maxValues = 2000;
-
-    for(size_t i = 0; i < maxValues; i++){
-        
-        inserter.insert(i);
+    
+    for(int i = 0; i < 6000; i++){
+        inserter.insert(i);     
     }
 
     inserter.finalize();
 
-    ColumnT col_t(std::move(column));
+    const Column* col;
+    col = &column;
+    
+    ColumnT col_t(col);
+    
+    REQUIRE(col_t.isCopied() == false);
+    REQUIRE(col_t.getSize() == 6000);
+    REQUIRE(col_t.getType() == col->type);
+    REQUIRE(col_t.getNumPages() == col->pages.size());
 
-    REQUIRE(col_t.getType() == DataType::INT32);
-    REQUIRE(col_t.getNumPages() > 1);
-    REQUIRE(col_t.getSize() == maxValues);
+    const Page* pageOg = col->pages[0];
+    const Page* pageRef = col_t.getPage(0);
+
+    REQUIRE(pageOg == pageRef);
+
+    int32_t* val = (int32_t*)col_t.getValueAtRow(10);
+    REQUIRE(*val == 10);
+
+    val = (int32_t*)col_t.getValueAtRow(5500);
+    REQUIRE(*val == 5500);
+
+    val = (int32_t*)col_t.getValueAtRow(6000);
+    REQUIRE(val == NULL);
+}
+
+TEST_CASE("INT32 column: insertion of existing pages", "[ColumnStore]"){
+
+    ColumnT col(DataType::INT32);
+    ColumnTInserter inserter(col);
+
+    REQUIRE(col.getNumPages() == 0);
+    REQUIRE(inserter.getLastPageIdx() == 0);
+    REQUIRE(col.getType() == DataType::INT32);
+    REQUIRE(col.getSize() == 0);
+
+    value_t val1;
+    value_t val2;
+    value_t val3;
+    value_t val4;
+
+    val1 = value_t::from_int(1);
+    val2 = value_t::from_int(2);
+    val3 = value_t::from_int(3);
+    val4 = value_t::from_int(4);
+
+    inserter.insert(val1);
+    inserter.insert(val2);
+    inserter.insert(val3);
+    inserter.insert(val4);
+
+    REQUIRE(col.getNumPages() == 1);
+    REQUIRE(col.getSize() == 4);
+    REQUIRE(col.getValueAt(0)->get_int() == 1);
+    REQUIRE(col.getValueAt(1)->get_int() == 2);
+    REQUIRE(col.getValueAt(2)->get_int() == 3);
+    REQUIRE(col.getValueAt(3)->get_int() == 4);
+
+    size_t dataStart = inserter.dataBegin(col.getPage(0));
+    REQUIRE(dataStart == sizeof(uint16_t) + 4*sizeof(value_t));
 
 
+    Page* pageToInsert = col.getPage(0);
+
+    // create new column 
+    ColumnT newCol(DataType::INT32);
+    ColumnTInserter newInserter(newCol);
+
+    REQUIRE(newCol.getNumPages() == 0);
+    REQUIRE(newCol.getSize() == 0);
+    REQUIRE(newInserter.getLastPageIdx() == 0);
+    REQUIRE(newCol.getType() == DataType::INT32);
+
+    // add page to new column
+    newInserter.insertPage(pageToInsert);
+
+    REQUIRE(newCol.getNumPages() == 1);
+    REQUIRE(newCol.getSize() == col.getSize());
+    REQUIRE(newInserter.getLastPageIdx() == inserter.getLastPageIdx());
+    REQUIRE(col.getValueAt(0)->get_int() == 1);
+    REQUIRE(col.getValueAt(1)->get_int() == 2);
+    REQUIRE(col.getValueAt(2)->get_int() == 3);
+    REQUIRE(col.getValueAt(3)->get_int() == 4);
+
+}
+
+TEST_CASE("INT32 column: insertion of multiple pages", "[ColumnStore]"){
+  
+    ColumnT col(DataType::INT32);
+    ColumnTInserter inserter(col);
+
+    size_t maxValues = (PAGE_SIZE - sizeof(uint16_t))/sizeof(value_t);
+
+    for(size_t i = 0; i < maxValues; i++){
+        
+        value_t val = value_t::from_int(static_cast<int32_t>(i));
+        inserter.insert(val);
+    }
+
+    REQUIRE(inserter.isFull(col.getPage(0)) == true);
+    REQUIRE(col.getNumPages() == 1);
+    REQUIRE(col.getSize() == maxValues);
+
+    // insert one more value to trigger new page creation
+    value_t val = value_t::from_int(maxValues);
+    inserter.insert(val);
+
+    REQUIRE(col.getNumPages() == 2);
+    REQUIRE(col.getSize() == maxValues + 1);
+    REQUIRE(inserter.getLastPageIdx() == 1);
+
+    Page* firstPage = col.getPage(0);
+    Page* secondPage = col.getPage(1);
+
+    int numValuesFirstPage = *reinterpret_cast<uint16_t*>(firstPage->data);
+    REQUIRE(numValuesFirstPage == maxValues);
+    REQUIRE(col.getValueAt(maxValues-2)->get_int() == (maxValues-2));
+
+    int numValuesSecondPage = *reinterpret_cast<uint16_t*>(secondPage->data);
+    REQUIRE(numValuesSecondPage == 1);
+    REQUIRE(col.getValueAt(maxValues - 1)->get_int() == (maxValues-1));
+
+    Page* pageToInsert = col.getPage(0);
+    Page* pageToInsert2 = col.getPage(1);
+    
+    
+    // create new column 
+    ColumnT newCol(DataType::INT32);
+    ColumnTInserter newInserter(newCol);
+
+    REQUIRE(newCol.getNumPages() == 0);
+    REQUIRE(newCol.getSize() == 0);
+    REQUIRE(newInserter.getLastPageIdx() == 0);
+    REQUIRE(newCol.getType() == DataType::INT32);
+
+    newInserter.insertPage(pageToInsert);
+    newInserter.insertPage(pageToInsert2);
+
+    REQUIRE(newCol.getNumPages() == 2);
+    REQUIRE(newCol.getSize() == col.getSize());
+    REQUIRE(newInserter.getLastPageIdx() == inserter.getLastPageIdx());
+    REQUIRE(col.getValueAt(0)->get_int() == 0);
+    REQUIRE(col.getValueAt(1)->get_int() == 1);
+    REQUIRE(col.getValueAt(2)->get_int() == 2);
+    REQUIRE(col.getValueAt(3)->get_int() == 3);
+    REQUIRE(col.getValueAt(maxValues - 1)->get_int() == (maxValues - 1));
+    REQUIRE(col.getValueAt(maxValues)->get_int() == maxValues);
+    
 
 }

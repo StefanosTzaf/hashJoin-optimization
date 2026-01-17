@@ -1,32 +1,28 @@
-name: Run Tests
+name: Workflow for leaderboard submission
 
 on:
   push:
-    branches: 
-      - "main"
+    branches: [ indexing ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ indexing ]
 
 jobs:
-  test:
+  leaderboard:
+    name: leaderboard
     runs-on:
-      group: k23a
-    
+      group: benchmark
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-        
-    - name: Configure CMake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
-    
-    - name: Build
-      run: cmake --build build -- -j $(nproc) fast
-    
-    - name: unit_tests
-      run: ./build/unit_tests_unchained
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    - name: unit_tests_columnStore
-      run: ./build/unit_tests_columnStore
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
 
-    - name: unit_tests_unchained
-      run: ./build/unit_tests_unchained
+      - name: Build project
+        run: |
+          cmake --build build -- -j$(nproc) leaderboard
+          
+      - name: Run for leaderboard
+        run: |
+          leaderboard.sh

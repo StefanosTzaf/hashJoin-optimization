@@ -1,5 +1,6 @@
 #include "ColumnStore.h"
 #include "LateMaterialization.h"
+#include <iostream>
 
 Page* ColumnT::newPage(){
 
@@ -7,6 +8,10 @@ Page* ColumnT::newPage(){
     pages.push_back(page);
 
     return page;
+}
+
+void ColumnT::addPage(Page* page){
+    pages.push_back(page);
 }
 
 size_t ColumnTInserter::dataBegin(Page* page) const {
@@ -91,4 +96,28 @@ void ColumnTInserter::insert(const value_t& val){
     (*numOfValues)++;
 
     column.size++;
+}
+
+void ColumnTInserter::insertPage(Page* page){
+
+    // insert page into vector
+    Page* pageToInsert = new Page;
+    memcpy(pageToInsert->data, page->data, sizeof(Page));
+    
+    // if the first page is to be added
+    // lastPageIdx remains 0
+    if(column.pages.size() != 0){
+        lastPageIdx++;
+    }
+
+    column.addPage(pageToInsert);
+
+    // row offset for new page is the current column size
+    column.pageRowOffset.push_back(column.size);
+
+    // get number of rows of existing page
+    uint16_t rows = *reinterpret_cast<uint16_t*>(pageToInsert->data);
+    
+    column.size += rows;
+
 }

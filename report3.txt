@@ -1,0 +1,59 @@
+original:
+Total runtime: 60971 ms
+Total runtime: 60142 ms
+Total runtime: 61001 ms
+
+Indexing
+Total runtime: 39346 ms
+Total runtime: 39228 ms
+Total runtime: 39268 ms
+Total runtime: 39184 ms
+
+M.O: 39256 ms
+
+Parallel:
+1. Build phase - no slab allocator
+Total runtime: 39257 ms
+Total runtime: 39282 ms
+Total runtime: 39218 ms
+Total runtime: 39272 ms
+
+M.O: 39257ms
+
+2. Probe phase
+
+-without late materialization
+Total runtime: 22645 ms
+Total runtime: 21080 ms
+Total runtime: 21269 ms
+Total runtime: 21255 ms
+Total runtime: 21076 ms
+
+- with parallel probe in late materialization (~ same)
+Total runtime: 21752 ms
+Total runtime: 21626 ms
+Total runtime: 22104 ms
+Total runtime: 21993 ms
+Total runtime: 21977 ms
+
+M.O: 21890 ms
+
+αυτα τα ετρεξα αργοτερα που δεν ειχε τοσο κοσμο (πιο εγκυρα)
+Total runtime: 19433 ms
+Total runtime: 19534 ms
+Total runtime: 19526 ms
+Total runtime: 19493 ms
+
+after work stealing
+Total runtime: 17726 ms
+Total runtime: 17766 ms
+Total runtime: 17660 ms
+Total runtime: 17741 ms
+
+TODO:
+- slab allocator
+- directory[-1]:
+    a special entry directory[-1]is used to point to the very beginning of the tuple storage. 
+    This is accomplished by initially allocating an additional space for the table, setting this 
+    first entry to the start of the tuple storage, and then shifting the pointer to the directory 
+    forward by one entry.Using a special entry avoids a potential branch in the probe.
