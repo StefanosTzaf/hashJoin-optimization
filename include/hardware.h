@@ -8,7 +8,7 @@
 
 // The servers might have multiple CPUs. We limit all benchmarks to a single node using numactl. The listed CPU numbers
 // below are for a single CPU. The listed NUMA numbers are just meant to give you a rough idea of the system.
-#define SPC__CORE_COUNT 24
+#define SPC__CORE_COUNT 12
 #define SPC__THREAD_COUNT 24
 
 // Obtained from `lsb_release -a`.
