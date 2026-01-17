@@ -2,9 +2,9 @@ name: Workflow for leaderboard submission
 
 on:
   push:
-    branches: [ indexing ]
+    branches: [ main ]
   pull_request:
-    branches: [ indexing ]
+    branches: [ main ]
 
 jobs:
   leaderboard:
