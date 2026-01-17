@@ -6,7 +6,7 @@
 #include <iostream>
 #include <nmmintrin.h>
 
-#define NUMBER_OF_THREADS 32
+#define NUMBER_OF_THREADS 24
 
 struct Tuple {
     int32_t key;
@@ -106,14 +106,22 @@ class UnchainedHashTable {
         // for 16 bits we will have 2^16 directory entries , Hardcoded so as to be able to be changed to find the bestvalue
         static constexpr uint32_t PREFIX_BITS = 16;
         static constexpr uint32_t PREFIX_COUNT = 1u << PREFIX_BITS;
+
         
+        uint32_t hashFunc(int32_t key){
+            uint32_t hash = _mm_crc32_u32(0xDEADBEEF, key);
+            hash ^= hash >> 16; 
+            hash *= 0x85ebca6b;
+            hash ^= hash >> 13;
+            return hash;
+        }
         inline uint32_t hash_prefix(int32_t key) {
-            uint32_t h = _mm_crc32_u32(0, key);
+            uint32_t h = hashFunc(key);
             return h >> (32 - PREFIX_BITS);
         }
 
         inline uint32_t get_partition_id(int32_t key) {
-            uint32_t h = _mm_crc32_u32(0, key);
+            uint32_t h = hashFunc(key);
             return h >> (32 - PARTITION_BITS);
         }
 

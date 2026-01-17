@@ -131,7 +131,7 @@ void UnchainedHashTable::build() {
         for (const auto& tuple: global_data[p]){
 
             // calculate hash value
-            uint32_t h = _mm_crc32_u32(0, tuple.key);
+            uint32_t h = hashFunc(tuple.key);
            
             // take the exact prefix (bucket that this tuple belongs to)
             uint32_t prefix = h >> (32 - PREFIX_BITS);
@@ -174,7 +174,7 @@ void UnchainedHashTable::build() {
         for (const auto& tuple: global_data[p]) {
    
             // find the correct bucket - prefix
-            uint32_t h = _mm_crc32_u32(0, tuple.key);
+            uint32_t h = hashFunc(tuple.key);
             uint32_t prefix = h >> (32 - PREFIX_BITS);
             
             // Get the current write pointer for this bucket
@@ -206,7 +206,7 @@ std::vector<size_t> UnchainedHashTable::search(int32_t key) {
     }
     
     // 2. Compute hash and get prefix (bucket)
-    uint32_t hash = _mm_crc32_u32(0, key);
+    uint32_t hash = hashFunc(key);
     uint32_t bucket = hash >> (32 - PREFIX_BITS);
     // 3. Get directory entry
     uint64_t entry = directory[bucket].data;
