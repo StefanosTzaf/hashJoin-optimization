@@ -6,7 +6,7 @@
 #include <iostream>
 #include <nmmintrin.h>
 
-#define NUMBER_OF_THREADS 16
+#define NUMBER_OF_THREADS 32
 
 struct Tuple {
     int32_t key;
@@ -66,7 +66,7 @@ struct DirectoryEntry {
 
 // parallel build structures
 // 3 bits = 8 partitions (1 per thread for 8 threads)
-static constexpr uint32_t PARTITION_BITS = 4; 
+static constexpr uint32_t PARTITION_BITS = 5; 
 static constexpr uint32_t NUM_PARTITIONS = 1u << PARTITION_BITS;
 
 // struct with all partitions for each thread
