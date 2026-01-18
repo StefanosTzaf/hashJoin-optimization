@@ -83,6 +83,7 @@ set(COMMON_SOURCES
     src/LateMaterialization.cpp
     src/ColumnStore.cpp
     src/unchained.cpp
+    src/slab.cpp
 )
 
 set(BASE_ENGINE src/execute.cpp)
