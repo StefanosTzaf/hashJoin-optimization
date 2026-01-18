@@ -65,7 +65,7 @@ void UnchainedHashTable::insert(int32_t key, size_t row_id) {
 void UnchainedHashTable::mergePartitions(){
     
     // each thread processes partition p by stealing from all collectors
-    #pragma omp parallel for num_threads(NUMBER_OF_THREADS) shared(global_data, collectors)
+    #pragma omp parallel for num_threads(NUMBER_OF_THREADS) shared(global_data, collectors) schedule(guided)
     for(uint32_t p = 0; p < NUM_PARTITIONS; p++){
         
         size_t total_size = 0;
@@ -121,7 +121,7 @@ void UnchainedHashTable::build() {
     tuple_buffer.resize(total_tuples); 
     
     // 2. parallel process partitions (Counting + Prefix Sum + Copy)
-    #pragma omp parallel for schedule(dynamic, 1) num_threads(NUMBER_OF_THREADS)
+    #pragma omp parallel for schedule(guided) num_threads(NUMBER_OF_THREADS)
     for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
         // Range of directory entries covered by this partition
         uint32_t shift = PREFIX_BITS - PARTITION_BITS;
