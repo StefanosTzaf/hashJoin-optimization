@@ -81,6 +81,8 @@ struct ThreadLocalData {
 class UnchainedHashTable {
 
     private:
+        GlobalAllocator global_allocator;
+        std::vector<ThreadLocalTupleCollector> collectors;
         // directory entries
         std::vector<DirectoryEntry> directory;
 

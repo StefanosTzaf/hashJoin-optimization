@@ -37,13 +37,19 @@ void DirectoryEntry::initBloomLookup() {
 }
 
 
-UnchainedHashTable::UnchainedHashTable(){
+UnchainedHashTable::UnchainedHashTable()
+    : global_allocator(1024 * 1024 * 100), collectors(NUMBER_OF_THREADS){
     // compute one time the bloom lookup table
     DirectoryEntry::initBloomLookup();
     directory.resize(PREFIX_COUNT);
     omp_set_num_threads(NUMBER_OF_THREADS);
     local_data.resize(NUMBER_OF_THREADS);
     global_data.resize(NUM_PARTITIONS);
+
+    for (int t = 0; t < NUMBER_OF_THREADS; t++){
+        collectors[t].init(global_allocator, 64 * 1024);  // 64KB SmallChunks
+    }
+    
 }
 
 
@@ -51,42 +57,43 @@ void UnchainedHashTable::insert(int32_t key, size_t row_id) {
     int tid = omp_get_thread_num();
     
     uint32_t p = get_partition_id(key);
-    
-    // insert into the vector of the partition, no slab allocator yet
-    local_data[tid].partitions[p].emplace_back(key, row_id);
+    Tuple tuple(key, row_id);
+    collectors[tid].consume(p, tuple);
 
 }
 
 void UnchainedHashTable::mergePartitions(){
     
-    // each thread calculates the total size of all partitions[p]
-    #pragma omp parallel for num_threads(NUMBER_OF_THREADS) shared(local_data, global_data)
+    // each thread processes partition p by stealing from all collectors
+    #pragma omp parallel for num_threads(NUMBER_OF_THREADS) shared(global_data, collectors)
     for(uint32_t p = 0; p < NUM_PARTITIONS; p++){
         
         size_t total_size = 0;
         // pre calculate the total size of all partitions[p]
         // of all threads so we can reserve space for the
         // global partition[p] and avoid reallocations
-        for(const auto& ld: local_data){
-            total_size += ld.partitions[p].size();
+        for(int t = 0; t < NUMBER_OF_THREADS; t++){
+            total_size += collectors[t].count(p);
         }
 
         global_data[p].reserve(total_size);
-    }
 
-    // move all local partitions[i] data to a single global partitions[i]
-    // each threads is resposible to move all partitions[p] into the global one
-    #pragma omp parallel for num_threads(NUMBER_OF_THREADS) shared(local_data, global_data)
-    for(uint32_t p = 0; p < NUM_PARTITIONS; p++){
-        
-        for(auto& ld: local_data){
-
-            // ???? TODO: check efficiency (copy/move)
-
-            // appent in global partition p all data of local partition p of the specific thread
-            global_data[p].insert(global_data[p].end(), ld.partitions[p].begin(), ld.partitions[p].end());
+        // Steal - merge partitions
+        for(int t = 0; t < NUMBER_OF_THREADS; t++){
+            // segments of collectors[t] partition p
+            Segment* segments = reinterpret_cast<Segment*>(
+                collectors[t].stealPartitionChunks(p)
+            );
             
-            ld.partitions[p].clear();
+            // Traverse and COPY tuples from segments to global_data[p] (TODO wihtout copy?)
+            while(segments){
+                Tuple* begin = reinterpret_cast<Tuple*>(segments->begin);
+                Tuple* end = reinterpret_cast<Tuple*>(segments->cur);
+                
+                global_data[p].insert(global_data[p].end(), begin, end);
+                
+                segments = segments->next;
+            }
         }
     }
 }
