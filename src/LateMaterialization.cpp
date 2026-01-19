@@ -207,12 +207,11 @@ struct RootJoinAlgorithm{
                             if(copied == true){
 
                                 threadInserters[threadId][output_col].insert(*(value_t*)(val));
-                                // inserters[output_col].insert(*(value_t*)(val));
                             }
                             // convert the int32_t to a value_t storing it
                             else{
                                 threadInserters[threadId][output_col].insert(value_t::from_int(*(int32_t*)(val)));
-                                // inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
+
                             }
                             
                             output_col++;
@@ -346,11 +345,9 @@ struct RootJoinAlgorithm{
 
                             if(copied == true){
                                 threadInserters[threadId][output_col].insert(*(value_t*)(val));
-                                // inserters[output_col].insert(*(value_t*)(val));
                             }
                             else{
                                 threadInserters[threadId][output_col].insert(value_t::from_int(*(int32_t*)(val)));
-                                // inserters[output_col].insert(value_t::from_int(*(int32_t*)(val)));
                             }
                             
                             output_col++;

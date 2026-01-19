@@ -9,9 +9,9 @@ Parts implemented by each member:
 ```bash
 /local-disk/sigmod25/make_links.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -Wno-dev
-cmake --build build -- -j $(nproc) fast
+cmake --build build -- -j $(nproc) leaderboard
 
-./build/fast plans.json
+./build/leaderboard plans.json
 ```
 
 The final version of each part of the project has been tagged with git tags as follows:
