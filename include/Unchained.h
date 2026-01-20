@@ -98,12 +98,6 @@ class UnchainedHashTable {
         // this contains the merged partitions after the collection of the tuples
         // in local_data: all partitions[0] of all threads, all partitions[1], etc
         std::vector<std::vector<Tuple>> global_data;
-
-        // how many bits will be used (from hash function output) for the directory indexing
-        // for 16 bits we will have 2^16 directory entries , Hardcoded so as to be able to be changed to find the bestvalue
-        static constexpr uint32_t PREFIX_BITS = 16;
-        static constexpr uint32_t PREFIX_COUNT = 1u << PREFIX_BITS;
-
         
         inline uint32_t hash_prefix(int32_t key) {
             uint32_t h = _mm_crc32_u32(0xDEADBEEF, key);;
