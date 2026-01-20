@@ -23,6 +23,11 @@ jobs:
         run: |
           cmake --build build -- -j$(nproc) leaderboard
           
+      - name: unit_tests
+        run: |
+          ./build/unit_tests
+          ./build/unit_tests_unchained
+          
       - name: Run for leaderboard
         run: |
           leaderboard.sh
