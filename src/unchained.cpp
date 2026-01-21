@@ -43,7 +43,6 @@ UnchainedHashTable::UnchainedHashTable()
     DirectoryEntry::initBloomLookup();
     directory.resize(PREFIX_COUNT);
     omp_set_num_threads(NUMBER_OF_THREADS);
-    local_data.resize(NUMBER_OF_THREADS);
     global_data.resize(NUM_PARTITIONS);
 
     for (int t = 0; t < NUMBER_OF_THREADS; t++){
@@ -102,18 +101,14 @@ void UnchainedHashTable::mergePartitions(){
 void UnchainedHashTable::build() {
 
     mergePartitions();
-
-    // stores the sizes of each partition
-    std::vector<size_t> partition_sizes(NUM_PARTITIONS, 0);
     
-    // 1. compute global offsets for each partition
+    // 1. compute global offsets for each partition:
     // number of tuples till the start of each partition
     // (like prefix_offset and prefix_count before)
     std::vector<size_t> partition_offsets(NUM_PARTITIONS, 0);
     size_t total_tuples = 0;
     for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
         partition_offsets[p] = total_tuples;
-        partition_sizes[p] = global_data[p].size();
         total_tuples += global_data[p].size();
     }
     
@@ -124,9 +119,8 @@ void UnchainedHashTable::build() {
     #pragma omp parallel for schedule(guided) num_threads(NUMBER_OF_THREADS)
     for (uint32_t p = 0; p < NUM_PARTITIONS; ++p) {
         // Range of directory entries covered by this partition
-        uint32_t shift = PREFIX_BITS - PARTITION_BITS;
-        uint32_t start_prefix = p << shift;
-        uint32_t end_prefix = (p + 1) << shift;
+        uint32_t start_prefix = p << SHIFT;
+        uint32_t end_prefix = (p + 1) << SHIFT;
 
         // Step A: Count Tuples for each prefix - bucket and Build Bloom Filters
         for (uint32_t i = start_prefix; i < end_prefix; ++i) {

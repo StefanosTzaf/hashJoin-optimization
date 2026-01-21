@@ -90,11 +90,6 @@ class UnchainedHashTable {
         std::vector<Tuple> tuple_buffer;
         
 
-        // first position has the partitions for the first thread, second for the second thread, etc
-        // in logic level wehave 8 NUMBER_OF_THREADS partitions, but each thread has its own local sub-partitions 
-        // to avoid synchronization during insertions
-        std::vector<ThreadLocalData> local_data;
-
         // this contains the merged partitions after the collection of the tuples
         // in local_data: all partitions[0] of all threads, all partitions[1], etc
         std::vector<std::vector<Tuple>> global_data;
