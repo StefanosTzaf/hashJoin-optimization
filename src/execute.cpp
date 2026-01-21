@@ -80,25 +80,29 @@ struct JoinAlgorithm {
             
             const std::vector<size_t>& pageRowOffsets = keyColumn.getPageRowOffsets();
             
-            std::atomic<size_t> probe_counter{0};
+            std::atomic<size_t> probe_counter = 0;
   
             #pragma omp parallel num_threads(NUMBER_OF_THREADS)
             {
             while(true){
 
                 // fetch 4 pages to minimize atomic operation overhead
+                // each thread gets a unique base index and processes up to 4 pages starting from base
                 size_t base = probe_counter.fetch_add(4, std::memory_order_relaxed);
                 
+                // the loop is continued while there are still pages left
                 if (base >= sizePages){
                     break;
                 }
 
                 for(size_t offset = 0; offset < 4; offset++){
-                    // take local index of row for current page
                     size_t pageIdx = base + offset ;
+                    
                     if(pageIdx >= sizePages){
                         break;
                     }
+                   
+                    // take local index of row for current page
                     size_t idx = pageRowOffsets[pageIdx]; 
                     const Page* page = keyColumn.getPage(pageIdx);
                     // first 2 bytes is numRows in both page formats
@@ -145,7 +149,7 @@ struct JoinAlgorithm {
             const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
             size_t probeSize = pagesProbe.size();
 
-            std::atomic<size_t> probe_counter2{0};
+            std::atomic<size_t> probe_counter2 = 0;
 
             #pragma omp parallel num_threads(NUMBER_OF_THREADS)
             {
@@ -153,15 +157,21 @@ struct JoinAlgorithm {
             // each thread should have its own vector
             std::vector<size_t> matching_indices;
             while(true){
+                
                 size_t base = probe_counter2.fetch_add(4, std::memory_order_relaxed);
+                
                 if(base >= probeSize){
                     break;
                 }
+                
                 for(size_t offset = 0; offset < 4; offset++){
+                   
                     size_t pageIdx = base + offset ;
+                    
                     if(pageIdx >= probeSize){
                         break;
                     } 
+                   
                     const Page* page = probeKeyColumn.getPage(pageIdx);
                     size_t right_idx = pageProbeRowOffsets[pageIdx];
                     const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
@@ -255,21 +265,27 @@ struct JoinAlgorithm {
             
             const std::vector<size_t>& pageRowOffsets = keyColumn.getPageRowOffsets();
             
-            std::atomic<size_t> probe_counter{0};
+            std::atomic<size_t> probe_counter = 0;
 
             #pragma omp parallel num_threads(NUMBER_OF_THREADS)
             {
             
             while(true){
+               
                 size_t base = probe_counter.fetch_add(4, std::memory_order_relaxed);
+               
                 if(base >= sizePages){
                     break;
                 }
+              
                 for(size_t offset = 0; offset < 4; offset++){
+                
                     size_t pageIdx = base + offset;
+                
                     if(pageIdx >= sizePages){
                         break;
                     }
+                 
                     size_t idx = pageRowOffsets[pageIdx]; // row index
                     const Page* page = keyColumn.getPage(pageIdx);
                     const uint16_t numRows = *reinterpret_cast<const uint16_t*>(page->data);
@@ -307,7 +323,7 @@ struct JoinAlgorithm {
             const std::vector<size_t>& pageProbeRowOffsets = probeKeyColumn.getPageRowOffsets();
             size_t probeSize = pagesProbe.size();
          
-            std::atomic<size_t> probe_counter2{0};
+            std::atomic<size_t> probe_counter2 = 0;
             #pragma omp parallel num_threads(NUMBER_OF_THREADS)
             {
             // each thread should have its own vector
@@ -315,12 +331,17 @@ struct JoinAlgorithm {
 
             int threadId = omp_get_thread_num();
             while(true){
+           
                 size_t base = probe_counter2.fetch_add(4, std::memory_order_relaxed);
+           
                 if(base >= probeSize){
                     break;
                 }
+               
                 for(size_t offset = 0; offset < 4; offset++){
+              
                     size_t pageIdx = base + offset ;
+               
                     if(pageIdx >= probeSize){
                         break;
                     }

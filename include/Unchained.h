@@ -64,19 +64,6 @@ struct DirectoryEntry {
 };
 
 
-// struct with all partitions for each thread
-struct ThreadLocalData {
-    
-    std::vector<std::vector<Tuple>> partitions;
-  
-    // each thread's Local data will be in different cache lines to avoid false sharing
-    uint8_t padding[64]; 
-
-    ThreadLocalData() {
-        partitions.resize(NUM_PARTITIONS);
-    }
-};
-
 // Unchained Hash Table Class , (all the logic inside, directory entries that contain bloom filters and pointers to tuples)
 class UnchainedHashTable {
 
