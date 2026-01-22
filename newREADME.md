@@ -1,10 +1,10 @@
-Eleftheria Galiatsatou 1115202200025
-Stefanos Tzaferis 1115202200183
+Eleftheria Galiatsatou 1115202200025 eleftheria.galiatsatou@gmail.com
+Stefanos Tzaferis 1115202200183 stzaferis04@gmail.com
 
+3rd part of project:
 Parts implemented by each member:
-    - Late Materialization: both
-    - Column Store: Eleftheria Galiatsatou
-    - Hash table: Stefanos Tzaferis
+    - Indexing optimization & Probe parallelization: Eleftheria Galiatsatou
+    - Slab allocator, build parallelization & work stealing: Stefanos Tzaferis
 
 ```bash
 /local-disk/sigmod25/make_links.sh
@@ -13,11 +13,6 @@ cmake --build build -- -j $(nproc) leaderboard
 
 ./build/leaderboard plans.json
 ```
-
-The final version of each part of the project has been tagged with git tags as follows:
--   first part - Late Materialization: v2.1.0 (branch LateMaterialization)
--   second part - Column Store: v2.2.0 (branch ColumnStore)
--   third part - Hash Table: v2.3.0 (branch main)
 
 To run the tests:
 
@@ -28,7 +23,6 @@ To run the tests:
 ```
 
 [2ND-PART]
-
 
 **Late Materialization**
 
@@ -151,6 +145,8 @@ In the search phase, for each key we find its bucket (DirectoryEntry) and
 then we check the bloom filter. If the bloom filter indicates that the maybe is present, we have to search linearly the bucket
 to find all the duplicates. If the bloom filter indicates that the key is definitely not present, we skip the bucket. Finally
 we return a vector<size_t> with all the values found for the given key.
+
+
 
 
 [3RD-PART]
