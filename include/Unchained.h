@@ -65,28 +65,30 @@ struct DirectoryEntry {
 
 
 // Unchained Hash Table Class , (all the logic inside, directory entries that contain bloom filters and pointers to tuples)
-class UnchainedHashTable {
+class UnchainedHashTable{
 
     private:
         GlobalAllocator global_allocator;
+
+        // stores the local results of each thread
         std::vector<ThreadLocalTupleCollector> collectors;
+        
         // directory entries
         std::vector<DirectoryEntry> directory;
 
         // Tuple storage: sorted by key (TODO do we need Paginated?)
         std::vector<Tuple> tuple_buffer;
         
-
-        // this contains the merged partitions after the collection of the tuples
-        // in local_data: all partitions[0] of all threads, all partitions[1], etc
+        // this contains the merged partitions after the collection of all threads'
+        // local results: all partitions[0] of all threads, all partitions[1], etc
         std::vector<std::vector<Tuple>> global_data;
         
-        inline uint32_t hash_prefix(int32_t key) {
+        inline uint32_t hash_prefix(int32_t key){
             uint32_t h = _mm_crc32_u32(0xDEADBEEF, key);;
             return h >> (32 - PREFIX_BITS);
         }
 
-        inline uint32_t get_partition_id(int32_t key) {
+        inline uint32_t get_partition_id(int32_t key){
             uint32_t h = _mm_crc32_u32(0xDEADBEEF, key);
             return h >> (32 - PARTITION_BITS);
         }
