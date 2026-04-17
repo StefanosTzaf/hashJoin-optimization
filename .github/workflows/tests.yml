@@ -9,8 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on:
-      group: k23a
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
@@ -27,5 +26,6 @@ jobs:
         ./build/unit_tests
         ./build/unit_tests_columnStore
         ./build/unit_tests_unchained
+
     - name: Run
       run: ./build/fast plans.json
