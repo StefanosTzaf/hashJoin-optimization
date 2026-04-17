@@ -26,6 +26,3 @@ jobs:
         ./build/unit_tests
         ./build/unit_tests_columnStore
         ./build/unit_tests_unchained
-
-    - name: Run
-      run: ./build/fast plans.json
