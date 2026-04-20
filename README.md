@@ -113,8 +113,8 @@ To review the chronological evolution of the project and our intermediate implem
 * **`v1.0.0`**: Initial implementations of 3 custom Hash Tables (Robin Hood, Hopscotch, Cuckoo). In tis commit there is also a local README file with the description of the hash tables and their implementation details.
 
 * **`v2.1.0`** Late Materialization
-* **`v2.2.0`** (branch ColumnStore): Third part - Hash Table: 
-* **`v2.3.0`** (branch main)
+* **`v2.2.0`** ColumnStore 
+* **`v2.3.0`** Unchained Hash Table
 * **`v2.3.1`**: Integration of Late Materialization, Column-Store format, and the Unchained Hash Table and some errors fixed. (newReadme.md file in this commit contains a detailed description of the architecture and the optimizations implemented up to this point)
 * **`v3.1.0`**: Introduction of Zero-Copy Indexing optimizations for dense columns.
 * **`v3.2.0`** *(Latest)*: Full parallelization of Build/Probe phases, Work Stealing, and Slab Allocator integration.
